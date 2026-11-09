@@ -72,7 +72,7 @@ public class Ticket implements Comparable<Ticket> {
      * Returns the description of the ticket.
      * @return description
      */
-    public String returnDescription() {
+    public String getDescription() {
         return description;
     }
     
@@ -81,7 +81,7 @@ public class Ticket implements Comparable<Ticket> {
      * Returns the severity of the ticket.
      * @return severity
      */
-    public String returnSeverity() {
+    public String getSeverity() {
         return severity;
     }
     
@@ -90,7 +90,7 @@ public class Ticket implements Comparable<Ticket> {
      * Returns the status of the ticket.
      * @return status
      */
-    public String returnStatus() {
+    public String getStatus() {
         return status;
     }
     
