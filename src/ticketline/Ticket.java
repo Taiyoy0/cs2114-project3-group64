@@ -26,26 +26,18 @@ public class Ticket implements Comparable<Ticket> {
      */
     public Ticket(String i, String c, String d, String s) {
         
-        if (i == null || i == "") {
-            throw new IllegalArgumentException("Invalid ID.");
+        id = normalizeId(i);
+        category = requireText(c, "category");
+        if (!(category.equalsIgnoreCase("Hardware")
+            || category.equalsIgnoreCase("Software")
+            || category.equalsIgnoreCase("Network")
+            || category.equalsIgnoreCase("Account")
+            || category.equalsIgnoreCase("Other"))) {
+            throw new IllegalArgumentException("Choose Hardware, Software, Network, Account, or Other.");
         }
-        
-        if (c == null || c == "") {
-            throw new IllegalArgumentException("Invalid category.");
-        }
-        
-        if (d == null || d == "") {
-            throw new IllegalArgumentException("Invalid description");
-        }
-        
-        if (s == null || s == "") {
-            throw new IllegalArgumentException("Invalid severity");
-        }
-        
-        id = i;
-        category = c;
-        description = d;
-        severity = s;
+        description = requireText(d, "description");
+        severity = requireText(s, "severity");
+        getSeverityValue(severity);
         status = "Open";
     }
     
@@ -101,11 +93,7 @@ public class Ticket implements Comparable<Ticket> {
      * @throws IllegalArgumentException if the new description is null or empty
      */
     public void updateDescription(String newDesc) {
-        if(newDesc == null || newDesc == "" ) {
-            throw new IllegalArgumentException("Invalid description.");
-        }
-        
-        description = newDesc;
+        description = requireText(newDesc, "description");
     }
     
     // ----------------------------------------------------------
@@ -115,11 +103,12 @@ public class Ticket implements Comparable<Ticket> {
      * @throws IllegalArgumentException if the new status is null or empty
      */
     public void updateStatus(String newStatus) {
-        if (newStatus == null || newStatus == "") {
+        String value = requireText(newStatus, "status");
+        if (!value.equals("Open") && !value.equals("In Progress")
+            && !value.equals("Closed")) {
             throw new IllegalArgumentException("Invalid status.");
         }
-        
-        status = newStatus;
+        status = value;
     }
 
     // ----------------------------------------------------------
@@ -146,7 +135,7 @@ public class Ticket implements Comparable<Ticket> {
      * "high", or "critical"
      */
     private int getSeverityValue(String sev) {
-        switch (sev.toLowerCase()) {
+        switch (sev.toLowerCase(java.util.Locale.ROOT)) {
             case "low":
                 return 1;
             case "medium":
@@ -159,4 +148,25 @@ public class Ticket implements Comparable<Ticket> {
                 throw new IllegalArgumentException("Invalid severity.");
         }
     }
+    /** Normalizes a user ID so 001 and 1 identify the same ticket. */
+    static String normalizeId(String value) {
+        try {
+            int number = Integer.parseInt(requireText(value, "ID"));
+            if (number > 0) {
+                return String.valueOf(number);
+            }
+        }
+        catch (NumberFormatException e) {
+            // Give the caller the same validation error for every invalid ID.
+        }
+        throw new IllegalArgumentException("Ticket ID must be a positive whole number.");
+    }
+
+    private static String requireText(String value, String field) {
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalArgumentException("Invalid " + field + ".");
+        }
+        return value.trim();
+    }
+
 }

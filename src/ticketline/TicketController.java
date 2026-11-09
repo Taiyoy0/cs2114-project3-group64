@@ -19,6 +19,7 @@ public class TicketController {
     private final HelpDeskModel model;
     private final ConsoleView view;
     private boolean running;
+    private final String saveFile;
 
     // ~ Constructors ..........................................................
 
@@ -31,8 +32,14 @@ public class TicketController {
      *            The instance of ConsoleView
      */
     public TicketController(HelpDeskModel model, ConsoleView view) {
+        this(model, view, SAVE_FILE);
+    }
+
+    /** Uses an explicit save path so tests never overwrite a real session. */
+    public TicketController(HelpDeskModel model, ConsoleView view, String saveFile) {
         this.model = Objects.requireNonNull(model, "model must not be null");
         this.view = Objects.requireNonNull(view, "view must not be null");
+        this.saveFile = Objects.requireNonNull(saveFile, "saveFile must not be null");
     }
 
     // ~Public Methods ........................................................
@@ -51,7 +58,7 @@ public class TicketController {
     /** Loads any saved tickets, then runs the main menu loop. */
     public void start() {
         try {
-            model.loadTickets(SAVE_FILE);
+            model.loadPendingTickets(saveFile);
         }
         catch (Exception e) {
             view.displayError("Could not load saved tickets: " + e.getMessage()
@@ -66,7 +73,7 @@ public class TicketController {
         running = true;
         while (running) {
             view.displayMenu();
-            handleMenuChoice(view.promptMenuChoice());
+            handleMenuChoice(view.getMenuChoice());
         }
     }
 
@@ -113,15 +120,18 @@ public class TicketController {
         boolean finished = false;
         while (!finished) {
             String id = readPositiveId();
-            String category = view.promptCategory();
-            String description = view.promptDescription();
-            // TODO (if severity joins the MVP): String severity =
-            // view.promptSeverity();
-            // and pass it to model.submitTicket(...) below.
+            String category = view.getCategory();
+            String description = view.getDescription();
+            String severity = view.getSeverity();
+            if (id == null || category == null || description == null
+                || severity == null) {
+                handleExit();
+                return;
+            }
 
             try {
-                if (model.submitTicket(id, category, description)) {
-                    view.displayMessage("Ticket " + id + " submitted.");
+                if (model.submitTicket(id, category, description, severity)) {
+                    view.displayTicketSubmitted(id);
                     finished = true;
                 }
                 else {
@@ -149,10 +159,13 @@ public class TicketController {
             view.displayMessage(NO_PENDING_MESSAGE);
             return;
         }
-        view.displayMessage("Pending tickets (" + pending.size() + "):");
-        for (Ticket ticket : pending) {
-            showTicket(ticket);
+        String[][] rows = new String[pending.size()][5];
+        for (int i = 0; i < pending.size(); i++) {
+            Ticket ticket = pending.get(i);
+            rows[i] = new String[] { ticket.getId(), ticket.getCategory(),
+                ticket.getDescription(), ticket.getSeverity(), ticket.getStatus() };
         }
+        view.displayPendingTickets(rows);
     }
 
 
@@ -164,7 +177,7 @@ public class TicketController {
         }
         try {
             view.displayMessage("Next ticket:");
-            showTicket(model.getNextTicket());
+            showTicket(model.peekNextTicket());
         }
         catch (IllegalStateException e) {
             view.displayMessage(NO_PENDING_MESSAGE);
@@ -180,8 +193,9 @@ public class TicketController {
         }
         try {
             Ticket processed = model.processNextTicket();
-            view.displayMessage("Processed ticket:");
-            showTicket(processed);
+            view.displayTicketProcessed(processed.getId());
+            view.displayTicketDetails(processed.getId(), processed.getCategory(),
+                processed.getDescription(), processed.getSeverity(), processed.getStatus());
         }
         catch (IllegalStateException e) {
             view.displayMessage(NO_PENDING_MESSAGE);
@@ -196,20 +210,26 @@ public class TicketController {
         boolean saved = false;
         while (!saved) {
             try {
-                model.saveTickets(SAVE_FILE);
+                model.savePendingTickets(saveFile);
                 saved = true;
             }
             catch (Exception e) {
                 view.displayError("Could not save tickets: " + e.getMessage());
+                if (view.isInputExhausted()) {
+                    view.displayError("Input ended; exiting without saving.");
+                    running = false;
+                    return;
+                }
                 if (askYesNo("Exit without saving? (y/n)")) {
                     break;
                 }
                 if (!askYesNo("Try saving again? (y/n)")) {
+                    if (view.isInputExhausted()) { running = false; }
                     return;
                 }
             }
         }
-        view.displayMessage("Goodbye.");
+        view.displayExitMessage();
         running = false;
     }
 
@@ -222,10 +242,10 @@ public class TicketController {
      */
     private String readPositiveId() {
         while (true) {
-            String raw = view.promptTicketId();
+            String raw = view.getTicketID();
             try {
                 if (raw == null) {
-                    throw new NumberFormatException("null input");
+                    return null;
                 }
                 int value = Integer.parseInt(raw.trim());
                 if (value > 0) {
@@ -250,8 +270,8 @@ public class TicketController {
      * Converts a Ticket to plain Strings so the view never sees a model object.
      */
     private void showTicket(Ticket ticket) {
-        view.displayTicket(String.valueOf(ticket.getID()), String.valueOf(ticket
-            .getCategory()), String.valueOf(ticket.getDescription()));
+        view.displayNextTicket(ticket.getId(), ticket.getCategory(),
+            ticket.getDescription(), ticket.getSeverity(), ticket.getStatus());
     }
 
 }

@@ -39,7 +39,7 @@ public class HelpDeskModel {
         String severity) {
         Ticket newTicket = new Ticket(id, category, description, severity);
         
-        if (idExists(id)) {
+        if (idExists(newTicket.getId())) {
             throw new IllegalArgumentException("ID already exists.");
         }
         
@@ -55,15 +55,16 @@ public class HelpDeskModel {
      * @return whether an old ticket has been found with the same given id
      */
     public boolean idExists(String i) {
+        i = Ticket.normalizeId(i);
         
         for (Ticket t : openTickets.toList()) {
-            if (t.getId() == i) {
+            if (t.getId().equals(i)) {
                 return true;
             }
         }
         
         for (Ticket t : completedTickets) {
-            if (t.getId() == i) {
+            if (t.getId().equals(i)) {
                 return true;
             }
         }
@@ -132,15 +133,12 @@ public class HelpDeskModel {
      */
     public void savePendingTickets(String filepath) throws IOException {
         
-        try (PrintWriter writer = new PrintWriter(new FileWriter(filepath))) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filepath))) {
             for (Ticket t : openTickets.toList()) {
-                writer.println(
-                    t.getId() + ", " +
-                    t.getCategory() + ", " +
-                    t.getDescription() + ", " +
-                    t.getSeverity() + ", " +
-                    t.getStatus()
-                );
+                writer.write(csv(t.getId()) + "," + csv(t.getCategory()) + ","
+                    + csv(t.getDescription()) + "," + csv(t.getSeverity())
+                    + "," + csv(t.getStatus()));
+                writer.newLine();
             }
         }
     }
@@ -162,36 +160,91 @@ public class HelpDeskModel {
         Queue<Ticket> loadedTickets = new Queue<>();
         List<String> loadedIds = new ArrayList<>();
         
-        try (BufferedReader reader = new BufferedReader(new FileReader(f))) {
-            String line;
-            
-            while ((line = reader.readLine()) != null) {
-                String[] parts = line.split(",", -1);
-                
-                if (parts.length != 5) {
+        try (PushbackReader reader = new PushbackReader(new FileReader(f), 1)) {
+            List<String> parts;
+            while ((parts = readRecord(reader)) != null) {
+                if (parts.size() != 5) {
                     throw new IOException("Malformed ticket data.");
                 }
-                
                 Ticket t;
-                
                 try {
-                    t = new Ticket(parts[0], parts[1], parts[2], parts[3]);
-
-                    t.updateStatus(parts[4]);
+                    t = new Ticket(parts.get(0), parts.get(1), parts.get(2), parts.get(3));
+                    t.updateStatus(parts.get(4).trim());
+                    if (t.getStatus().equals("Closed")) {
+                        throw new IllegalArgumentException("Closed ticket in pending file.");
+                    }
                 }
                 catch (IllegalArgumentException e) {
                     throw new IOException("Invalid ticket data.", e);
                 }
-                
-                if (loadedIds.contains(t.getId()) || idExists(t.getId())) {
+                boolean completedId = false;
+                for (Ticket completed : completedTickets) {
+                    completedId |= completed.getId().equals(t.getId());
+                }
+                if (loadedIds.contains(t.getId()) || completedId) {
                     throw new IOException("Duplicate ticket ID.");
                 }
-                
                 loadedIds.add(t.getId());
                 loadedTickets.enqueue(t);
             }
         }
-        
+
         openTickets = loadedTickets;
     }
+    private static String csv(String value) {
+        return "\"" + value.replace("\"", "\"\"") + "\"";
+    }
+
+    /** Reads quoted CSV, including commas, quotes, and newlines in descriptions. */
+    private static List<String> readRecord(PushbackReader reader) throws IOException {
+        List<String> fields = new ArrayList<>();
+        StringBuilder field = new StringBuilder();
+        boolean quoted = false;
+        boolean afterQuote = false;
+        boolean seen = false;
+        int code;
+        while ((code = reader.read()) != -1) {
+            seen = true;
+            char ch = (char)code;
+            if (quoted) {
+                if (ch == '"') {
+                    int next = reader.read();
+                    if (next == '"') {
+                        field.append('"');
+                    }
+                    else {
+                        quoted = false;
+                        afterQuote = true;
+                        if (next != -1) { reader.unread(next); }
+                    }
+                }
+                else { field.append(ch); }
+            }
+            else if (ch == ',') {
+                fields.add(field.toString());
+                field.setLength(0);
+                afterQuote = false;
+            }
+            else if (ch == '\n' || ch == '\r') {
+                if (ch == '\r') {
+                    int next = reader.read();
+                    if (next != -1 && next != '\n') { reader.unread(next); }
+                }
+                fields.add(field.toString());
+                return fields;
+            }
+            else if (ch == '"' && field.length() == 0 && !afterQuote) {
+                quoted = true;
+            }
+            else if (ch == '"' || (afterQuote && !Character.isWhitespace(ch))) {
+                throw new IOException("Malformed CSV field.");
+            }
+            else if (!afterQuote) { field.append(ch); }
+        }
+        if (quoted) { throw new IOException("Unclosed CSV quote."); }
+        if (!seen) { return null; }
+        fields.add(field.toString());
+        return fields;
+    }
+
 }
