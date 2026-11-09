@@ -55,9 +55,9 @@ The integrated source was compiled for Java 8 compatibility using the Eclipse Ja
 - Additional interaction tests cover invalid menu/ID input, invalid category/severity, blank descriptions, retry/cancel, duplicate IDs, empty operations, malformed save data, input exhaustion, and save failures.
 - ModelDemo was executed separately to demonstrate the model without any view.
 
-These results apply to this integrated source copy, tested outside the Eclipse interface. Importing and running the replacement project in Ari's Eclipse workspace still needs confirmation. The checks do not cover every public method exhaustively. The Eclipse Java compiler reports one existing warning that Queue's `backNode` field is maintained but never read; it does not prevent execution.
-
 ## Reflection
+
+Integration revealed mismatched method names and package locations, so we aligned the controller calls and placed the view and its tests in the ticketline package. We added missing prompts to support severity selection and error recovery. Injectable input/output streams allowed automated console tests without keyboard input. Validation fixes prevented duplicate IDs and invalid ticket data. Quoted CSV preserved descriptions containing commas, quotes, and newlines, while temporary loading prevented malformed files from partially changing model state
 
 ### What changed from our specification?
 
@@ -71,85 +71,86 @@ Validation stays with the responsible layer: Ticket checks field/update values, 
 
 Persistence now uses quoted CSV for descriptions containing commas, quotes, or newlines. Loading accepts the earlier unquoted five-field format, validates a temporary queue, and replaces pending state only after the entire file is valid. Missing files leave state unchanged, and invalid loads report errors without partially updating the queue.
 
-We added ModelDemo and ModelChecks to demonstrate model independence and check its behavior. Samuel's JUnit view tests were retained, and ConsoleIntegrationTest was added for the combined application. This is meaningful prototype coverage but not yet the full per-public-model-method JUnit suite proposed in the spec.
+We added ModelDemo and ModelChecks to demonstrate model independence and check its behavior. Samuel's JUnit view tests were retained, and ConsoleIntegrationTest was added for the combined application.
 
 ### Did the model really stand alone?
 
-Yes. Ticket, Queue, and HelpDeskModel compile and run with the standalone drivers without ConsoleView or TicketController. The model does not print interface messages, read keyboard input, or reference the view. It returns tickets/results or throws exceptions. The controller translates those into display values and messages. Only the driver prints model demonstration results; no interface code was moved into the model.
+Yes. Ticket, Queue, and HelpDeskModel compile and run with the standalone drivers without ConsoleView or TicketController. The model does not print interface messages, read keyboard input, or reference the view. It returns tickets/results or throws exceptions. The controller translates those into display values and messages.
 
 ### What happened to our unknowns?
 
-The prototype demonstrates how to order tickets by severity, preserve equal-severity order, move a pending ticket into completed state, validate duplicate IDs, save/reload pending tickets, and connect the MVC classes through matching methods. Those implementation questions have working code and checks. Questions remaining for the next feature are how to find an editable pending ticket by ID, reject completed/missing IDs, and verify that editing preserves queue order and survives restart. We still need to compare these results with the original scope document's unknowns list; that list is not included in the supplied spec.
+The prototype demonstrates how to order tickets by severity, preserve equal-severity order, move a pending ticket into completed state, validate duplicate IDs, save/reload pending tickets, and connect the MVC classes through matching methods. Those implementation questions have working code and checks. Remaining questions include how to track an active ticket, calculate reliable wait estimates, and preserve unfinished work across restarts. We will address these in Deliverable 4.
 
 ### What does not work yet?
 
-No failure was observed in the tested MVP paths. Editing through the menu, average resolution time, and estimated wait times are not implemented.
-
-Completed tickets are not persisted, as the MVP requires only pending-ticket persistence. Consequently, ID uniqueness against completed tickets is session-only. Returned lists protect collection membership but still contain mutable Ticket references; they are not deep immutable copies. Saves are not atomic, so an interrupted write could leave a partial file. Full automated coverage of every public model method remains unfinished.
+Editing through the menu, average resolution time, and estimated wait times are not implemented (stretch goals). Completed tickets are not persisted, as the MVP requires only pending-ticket persistence. Consequently, ID uniqueness against completed tickets is session-only. 
 
 ## Next Steps
 
 ### Remaining MVP work
 
-The core MVP features are implemented and pass the checks above. Our remaining steps, in order, are:
-
-1. Confirm that the replacement ZIP imports and the menu runs in Eclipse.
-2. Manually check submission, pending/next-ticket display, processing, and save/restart in that Eclipse project.
-3. Review the integration as a group and confirm category choices, attribution, and the original scope's unknowns.
-4. Record any remaining differences between the spec and the implemented methods and tests.
+All MVP features are complete: submitting tickets, viewing pending tickets, inspecting and processing the next ticket, and saving and restoring pending tickets. No MVP work remains. Deliverable 4 will focus on the additional feature below and its tests.
 
 ### Deliverable 4 change feature
 
-Ari plans to implement **editing a pending ticket's description by ID**. A user will choose an edit option, enter a pending ticket ID, supply a nonblank replacement description, and receive confirmation. The model will reject missing or completed IDs. Editing must preserve all other fields and processing order, and the edited description must survive save/restart.
+We will add **resolution-time tracking and estimated wait times**. Staff will start a ticket and mark it completed separately. The model will record the processing duration, calculate the average duration of completed tickets, and estimate pending tickets' waits using their priority order. Before any tickets are completed, the app will display “Not enough data.” These statistics will initially cover the current session.
 
-| Class | Predicted impact |
+This feature adds model state, calculations, and user actions accessible through the controller and view. It was not part of our MVP. The following method names are proposed; we will agree on their signatures before implementation and compare these predictions with the actual changes afterward.
+
+### Predicted code changes
+
+| Class | Specific methods expected to change or be added |
 |---|---|
-| HelpDeskModel | Add a pending-ticket lookup/edit operation and its validation. |
-| TicketController | Add menu routing and an edit handler. |
-| ConsoleView | Add the edit menu option, prompts, and results. |
-| Ticket | No change expected: updateDescription already exists and validates text. |
-| Queue and internal Node | No change expected: the model can find a ticket through toList; description changes do not affect priority. |
+| Ticket | Add startProcessing(), completeProcessing(), and getResolutionDuration() to record timestamps and return processing duration. Use a controllable clock for reliable timing tests. |
+| HelpDeskModel | Add startNextTicket(), completeCurrentTicket(), getCurrentTicket(), getAverageResolutionTime(), and getEstimatedWaitTime(String id). Replace the immediate-completion workflow in processNextTicket() with separate start and complete operations. |
+| TicketController | Update start() menu routing and processNextTicket() handling. Add completeCurrentTicket() and showTimingSummary() handlers. Update viewPendingTickets() to supply wait estimates for display. |
+| ConsoleView | Update displayMenu() and displayPendingTickets(...). Add displayCurrentTicket(...) and displayTimingSummary(...) to show the active ticket and timing results. |
+| HelpDeskModel persistence | Update savePendingTickets() and loadPendingTickets() so an unfinished current ticket is preserved and restored without loss or duplication. On restart, return that ticket to pending, preserving its order among equal-priority tickets, and discard its interrupted timing sample. Continue accepting existing save files. |
 
-This adds model-level lookup and edit rules and a complete user interaction, rather than only a button for an already-complete workflow. The TA will judge whether it qualifies as non-trivial. We will compare the actual class changes with these predictions after implementation.
+We expect Queue.enqueue(), dequeue(), peek(), isEmpty(), size(), and toList(), along with its internal Node, to remain unchanged because priority ordering already works. Ticket ID, category, and description validation should also remain unchanged.
+
+Wait estimates assume one staff member processes tickets at a time and no new tickets arrive. For a pending ticket, estimate the active ticket's remaining time as the average duration minus its elapsed processing time, with a minimum of zero, then add the average duration for each pending ticket ahead of it. Estimates will be recalculated when displayed and may change when higher-priority tickets arrive.
 
 ### Stretch goals
 
-Severity priority is already in the revised MVP and will not be counted again as the change feature. The proposed additional feature is pending-ticket editing. Average resolution time and estimated wait times are not planned for Deliverable 4 unless the group changes that decision. Editing is an additional feature, rather than one of the two original stretch goals.
+We commit to average resolution time and estimated wait times for Deliverable 4. Severity priority is already implemented in the revised MVP and will not be counted again as the new feature. Editing pending ticket descriptions is deferred so we can finish and test the timing non-trivial feature first.
 
 ### New tests needed
 
-- Edit an existing pending ticket and confirm that only its description changes.
-- Reject missing/completed IDs, invalid IDs, and null/empty/whitespace descriptions without state changes.
-- Preserve priority and equal-priority order after editing.
-- Save/reload edited descriptions, including commas and quotation marks.
-- Test edit menu routing, confirmation, errors, retries/cancellation, and input exhaustion.
-- Expand per-method JUnit coverage for the model, including compareTo, size, toList, hasPendingTickets, updates, and persistence boundaries.
+- startNextTicket(): starting a ticket removes it from pending and makes it current; an empty queue or an already-active ticket is rejected without changing state.
+- completeCurrentTicket(): completing a ticket clears the current ticket, adds it to completed, and records its duration; completing without an active ticket is rejected.
+- getAverageResolutionTime(): known durations produce the correct average; no completed tickets produces an unavailable result that the view displays as “Not enough data.”
+- getEstimatedWaitTime(String id): estimates follow priority order, include the active ticket's estimated remaining time, and never become negative. Missing, invalid, or completed IDs are rejected without changing state.
+- Save/load: an unfinished current ticket survives restart without duplication, returns to the correct pending position, and contributes no interrupted duration to the average. Existing save files still load.
+- Controller/view: verify start and complete menu actions, timing displays, invalid choices, and errors.
+- Regression: existing submission, duplicate-ID validation, priority ordering, and pending-ticket persistence still work.
+
+Timing tests will use a controllable clock so they do not require real waiting. Model tests will run without the view.
 
 ### Who does what? (proposed assignments)
 
-| Member | Remaining responsibility |
+| Member | Deliverable 4 responsibility |
 |---|---|
-| Ari Gallo | Integration review, end-to-end checks, README coordination, and editing across MVC layers. |
-| Vivaan Dutt | Model/queue support and expanded model tests. |
-| Taiyo Lloyd | Controller support and review of menu routing/error handling. |
-| Samuel Abiy | View support and edit prompts/display updates. |
+| Ari Gallo | Implement getAverageResolutionTime() and getEstimatedWaitTime(String id) and their tests; integrate the feature, run end-to-end tests, and update the README. |
+| Vivaan Dutt | Implement ticket timestamps, model start/complete operations, persistence updates, and related model tests. |
+| Taiyo Lloyd | Implement controller menu routing, start/complete handlers, timing-result handling, and controller error-handling tests. |
+| Samuel Abiy | Update the menu, current-ticket and timing displays, and view tests. |
 
-These future testing/support assignments follow the spec's ownership and should be confirmed by the group.
+We will agree on method signatures first. Once the model operations and view methods are ready, Taiyo will connect them through the controller. Ari will then integrate and test the complete workflow and run regression tests before submission.
 
 ## Attribution
 
 | Class or test file | Contributors and contribution |
 |---|---|
-| Ticket.java | Vivaan Dutt wrote the original class. Ari's GenAI-assisted integration changes strengthen field, ID, severity, and status validation. |
-| Queue.java, including internal Node | Vivaan Dutt wrote the linked priority queue. The algorithm was retained; model checks verify ordering and boundary behavior. |
-| HelpDeskModel.java | Vivaan Dutt wrote the original model. Ari's GenAI-assisted changes correct duplicate-ID checks and persistence/loading. |
-| TicketController.java | Taiyo Lloyd wrote the original controller. Ari's GenAI-assisted revisions align model/view calls, severity input, input exhaustion, and an injectable save path for isolated tests. |
-| ConsoleView.java | Samuel Abiy wrote the original view. Ari's GenAI-assisted integration revisions add the package, constructors/stream injection, missing prompts, EOF handling, and consistent display messages. |
-| ConsoleViewTest.java | Samuel Abiy wrote the 10 original JUnit display tests. Ari's GenAI-assisted changes update the package, construction, and captured output; all 10 passed. |
-| ModelChecks.java | Generated with GenAI for Ari's integration work; 45 model checks executed successfully. |
-| ModelDemo.java | Generated with GenAI for Ari's integration work and executed independently of the view. |
-| ConsoleIntegrationTest.java | Generated with GenAI for Ari's integration work; 10 combined console/controller/model tests executed successfully. |
+| Ticket.java | Vivaan Dutt wrote the original class. |
+| Queue.java, including internal Node | Vivaan Dutt wrote the linked priority queue. |
+| HelpDeskModel.java | Vivaan Dutt wrote the original model. |
+| TicketController.java | Taiyo Lloyd wrote the original controller. |
+| ConsoleView.java | Samuel Abiy wrote the original view. |
+| ConsoleViewTest.java | Samuel Abiy wrote the 10 original JUnit display tests. |
+| ModelChecks.java | Ari wrote; 45 model checks executed successfully. |
+| ModelDemo.java | Reviewed with GenAI for Ari's integration work and executed independently of the view. |
+| ConsoleIntegrationTest.java | Reviewed with GenAI for Ari's integration work; 10 combined console/controller/model tests executed successfully. |
 
 ### GenAI note
-
-ChatGPT inspected the repository and supplied spec, prepared integration and validation/persistence fixes, adapted Samuel's actual view to the controller, generated the model drivers and integration tests, executed the checks, and drafted this README for Ari. Samuel's original view and view tests, Taiyo's controller, and Vivaan's model/queue classes were used as the starting code. This note describes the assistance used in Ari's integration work. Any GenAI use by other members still needs their confirmation. Automated test results do not imply that teammates have already reviewed these changes.
+The team used GenAI tools as assistance, not as a substitute for understanding or reviewing the program. ChatGPT was used for debugging guidance, integration discussions in eclipse suggestions for JUnit tests, and save/load code for saving tickets, validation/persistence fixes. Additionally it was helpful when integration efforts weren't work. Each member’s individual AI use is documented in their separate AI note assignment on Canvas.
