@@ -144,6 +144,7 @@ We will agree on method signatures first. Once the model operations and view met
 |---|---|
 | Ticket.java | Vivaan Dutt wrote the original class. |
 | Queue.java, including internal Node | Vivaan Dutt wrote the linked priority queue. |
+| QueueTest.java | Ari Gallo added the queue test class, created with GenAI assistance, to test core queue methods, priority ordering, equal-priority FIFO, and error cases. |
 | HelpDeskModel.java | Vivaan Dutt wrote the original model. |
 | TicketController.java | Taiyo Lloyd wrote the original controller. |
 | ConsoleView.java | Samuel Abiy wrote the original view. |
