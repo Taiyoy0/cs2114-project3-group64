@@ -15,6 +15,7 @@ public class TicketController {
 
     private static final String SAVE_FILE = "tickets.txt";
     private static final String NO_PENDING_MESSAGE = "No pending tickets.";
+    private static final String NO_DATA_MESSAGE = "Not enough data.";
 
     private final HelpDeskModel model;
     private final ConsoleView view;
@@ -35,11 +36,16 @@ public class TicketController {
         this(model, view, SAVE_FILE);
     }
 
+
     /** Uses an explicit save path so tests never overwrite a real session. */
-    public TicketController(HelpDeskModel model, ConsoleView view, String saveFile) {
+    public TicketController(
+        HelpDeskModel model,
+        ConsoleView view,
+        String saveFile) {
         this.model = Objects.requireNonNull(model, "model must not be null");
         this.view = Objects.requireNonNull(view, "view must not be null");
-        this.saveFile = Objects.requireNonNull(saveFile, "saveFile must not be null");
+        this.saveFile = Objects.requireNonNull(saveFile,
+            "saveFile must not be null");
     }
 
     // ~Public Methods ........................................................
@@ -105,9 +111,15 @@ public class TicketController {
             case "5":
                 handleExit();
                 break;
+            case "6":
+                handleCompleteCurrent();
+                break;
+            case "7":
+                handleShowTimingSummary();
+                break;
             default:
                 view.displayError(
-                    "Invalid selection. Please enter a number from 1 to 5.");
+                    "Invalid selection. Please enter a number from 1 to 7.");
                 break;
         }
     }
@@ -152,18 +164,23 @@ public class TicketController {
     }
 
 
-    /** Displays every pending ticket in queue order. */
+    /**
+     * Displays every pending ticket in queue order, with an estimated wait
+     * time for each as the sixth column.
+     */
     public void handleViewPending() {
         List<Ticket> pending = model.getPendingTickets();
         if (pending.isEmpty()) {
             view.displayMessage(NO_PENDING_MESSAGE);
             return;
         }
-        String[][] rows = new String[pending.size()][5];
+        String[][] rows = new String[pending.size()][6];
         for (int i = 0; i < pending.size(); i++) {
             Ticket ticket = pending.get(i);
             rows[i] = new String[] { ticket.getId(), ticket.getCategory(),
-                ticket.getDescription(), ticket.getSeverity(), ticket.getStatus() };
+                ticket.getDescription(), ticket.getSeverity(), ticket
+                    .getStatus(), formatDuration(model.getEstimatedWaitTime(
+                        ticket.getId())) };
         }
         view.displayPendingTickets(rows);
     }
@@ -185,21 +202,48 @@ public class TicketController {
     }
 
 
-    /** Processes the next ticket and displays the result. */
+    /**
+     * Starts the next ticket (it becomes the current ticket) and displays it.
+     * The ticket is finished separately by handleCompleteCurrent().
+     */
     public void handleProcessNext() {
         if (!model.hasPendingTickets()) {
             view.displayMessage(NO_PENDING_MESSAGE);
             return;
         }
         try {
-            Ticket processed = model.processNextTicket();
-            view.displayTicketProcessed(processed.getId());
-            view.displayTicketDetails(processed.getId(), processed.getCategory(),
-                processed.getDescription(), processed.getSeverity(), processed.getStatus());
+            Ticket started = model.startNextTicket();
+            view.displayCurrentTicket(started.getId(), started.getCategory(),
+                started.getDescription(), started.getSeverity(), started
+                    .getStatus());
         }
         catch (IllegalStateException e) {
-            view.displayMessage(NO_PENDING_MESSAGE);
+            // e.g. a ticket is already being processed
+            view.displayError(e.getMessage());
         }
+    }
+
+
+    /** Completes the current ticket and displays the result. */
+    public void handleCompleteCurrent() {
+        try {
+            Ticket completed = model.completeCurrentTicket();
+            view.displayTicketProcessed(completed.getId());
+            view.displayTicketDetails(completed.getId(), completed
+                .getCategory(), completed.getDescription(), completed
+                    .getSeverity(), completed.getStatus());
+        }
+        catch (IllegalStateException e) {
+            // e.g. no ticket is currently being processed
+            view.displayError(e.getMessage());
+        }
+    }
+
+
+    /** Displays the average resolution time of completed tickets. */
+    public void handleShowTimingSummary() {
+        view.displayTimingSummary(formatDuration(model
+            .getAverageResolutionTime()));
     }
 
 
@@ -224,7 +268,9 @@ public class TicketController {
                     break;
                 }
                 if (!askYesNo("Try saving again? (y/n)")) {
-                    if (view.isInputExhausted()) { running = false; }
+                    if (view.isInputExhausted()) {
+                        running = false;
+                    }
                     return;
                 }
             }
@@ -270,8 +316,20 @@ public class TicketController {
      * Converts a Ticket to plain Strings so the view never sees a model object.
      */
     private void showTicket(Ticket ticket) {
-        view.displayNextTicket(ticket.getId(), ticket.getCategory(),
-            ticket.getDescription(), ticket.getSeverity(), ticket.getStatus());
+        view.displayNextTicket(ticket.getId(), ticket.getCategory(), ticket
+            .getDescription(), ticket.getSeverity(), ticket.getStatus());
+    }
+
+
+    /**
+     * Turns a duration in seconds into display text. A negative value means
+     * the model has no data yet.
+     */
+    private String formatDuration(long seconds) {
+        if (seconds < 0) {
+            return NO_DATA_MESSAGE;
+        }
+        return (seconds / 60) + "m " + (seconds % 60) + "s";
     }
 
 }
