@@ -230,6 +230,6 @@ public class ConsoleViewTest
 
         String result = view.displayPendingTickets(tickets);
 
-        assertTrue(result.contains("Estimated Wait: 06m 07s"));
+        assertTrue(result.contains("Estimated Wait: 6m 07s"));
     }
 }

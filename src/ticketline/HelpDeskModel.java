@@ -3,6 +3,9 @@ package ticketline;
 import java.util.List;
 import java.util.ArrayList;
 import java.io.*;
+import java.time.Clock;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
 
 // -------------------------------------------------------------------------
 /**
@@ -16,12 +19,21 @@ public class HelpDeskModel {
     private Queue<Ticket> openTickets;
     private List<Ticket> completedTickets;
     private Ticket currentTicket;
+    private final Clock clock;
+    private final ResolutionTimeCalculator timing = new ResolutionTimeCalculator();
     
     // ----------------------------------------------------------
     /**
      * Create a new HelpDeskModel object.
      */
     public HelpDeskModel() {
+        this(Clock.systemUTC());
+    }
+
+    /** All tickets use the same injectable clock; model tests need no UI. */
+    public HelpDeskModel(Clock clock) {
+        if (clock == null) { throw new IllegalArgumentException("Clock cannot be null."); }
+        this.clock = clock;
         openTickets = new Queue<>();
         completedTickets = new ArrayList<>();
     }
@@ -38,7 +50,7 @@ public class HelpDeskModel {
      */
     public boolean submitTicket(String id, String category, String description, 
         String severity) {
-        Ticket newTicket = new Ticket(id, category, description, severity);
+        Ticket newTicket = new Ticket(id, category, description, severity, clock);
         
         if (idExists(newTicket.getId())) {
             throw new IllegalArgumentException("ID already exists.");
@@ -92,7 +104,7 @@ public class HelpDeskModel {
      * @throws IllegalStateException if a ticket is already being processed or
      * if there are no tickets to process
      */
-    public void startNextTicket() {
+    public Ticket startNextTicket() {
         
         if (currentTicket != null) {
             throw new IllegalStateException("Already processing a ticket.");
@@ -101,8 +113,10 @@ public class HelpDeskModel {
             throw new IllegalStateException("No tickets to process.");
         }
         
+        Ticket next = openTickets.peek();
+        next.startProcessing();
         currentTicket = openTickets.dequeue();
-        currentTicket.startProcessing();
+        return currentTicket;
     }
     
     // ----------------------------------------------------------
@@ -110,39 +124,36 @@ public class HelpDeskModel {
      * Finishes processing the current ticket being processed.
      * @throws IllegalStateException if no ticket is currently being processed
      */
-    public void completeCurrentTicket() {
+    public Ticket completeCurrentTicket() {
         if (currentTicket == null) {
             throw new IllegalStateException
             ("No ticket currently being processed");
         }
         
         currentTicket.completeProcessing();
-        completedTickets.add(currentTicket);
+        Ticket completed = currentTicket;
+        timing.recordResolutionTime(completed.getResolutionDuration().getSeconds());
+        completedTickets.add(completed);
         currentTicket = null;
+        return completed;
     }
     
     // ----------------------------------------------------------
     /**
-     * Returns whether there are open tickets pending. Considers currentTicket
-     * as well.
+     * Returns whether there are queued tickets waiting to start; excludes the active ticket.
      * @return true if openTicket is not empty
      */
     public boolean hasPendingTickets() {
-        return !openTickets.isEmpty() || currentTicket != null;
+        return !openTickets.isEmpty();
     }
     
     // ----------------------------------------------------------
     /**
-     * Returns the pending tickets as a List. Includes the currentTicket being
-     * processed if there is one.
+     * Returns a list of queued tickets; the active ticket is available separately.
      * @return the entries of openTickets in a list
      */
     public List<Ticket> getPendingTickets() {
-        ArrayList<Ticket> ret = new ArrayList<>(openTickets.toList());
-        if (currentTicket != null) {
-            ret.add(currentTicket);
-        }
-        return ret;
+        return new ArrayList<>(openTickets.toList());
     }
     
     // ----------------------------------------------------------
@@ -161,102 +172,98 @@ public class HelpDeskModel {
      * @throws IOException if the filepath doesn't work
      */
     public void savePendingTickets(String filepath) throws IOException {
-        
-        try (BufferedWriter writer = new BufferedWriter
-            (new FileWriter(filepath))) {
-            for (Ticket t : openTickets.toList()) {
-                writer.write(csv(t.getId()) + "," + csv(t.getCategory()) + ","
-                    + csv(t.getDescription()) + "," + csv(t.getSeverity())
-                    + "," + csv(t.getStatus()));
-                writer.newLine();
+        Path target = checkedPath(filepath).toAbsolutePath();
+        if (Files.isDirectory(target)) { throw new IOException("Save path is a directory."); }
+        Path temp = Files.createTempFile(target.getParent(), "ticketline-", ".tmp");
+        try {
+            try (BufferedWriter writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
+                // Active work was removed first, so write it before equal-priority peers.
+                if (currentTicket != null) { writeTicket(writer, currentTicket); }
+                for (Ticket ticket : openTickets.toList()) { writeTicket(writer, ticket); }
             }
-            if (currentTicket != null) {
-                writer.write(csv(currentTicket.getId()) + "," 
-                    + csv(currentTicket.getCategory()) + ","
-                    + csv(currentTicket.getDescription()) + ","
-                    + csv(currentTicket.getSeverity()) + ","
-                    + csv(currentTicket.getStatus()));
-                writer.newLine();
+            try {
+                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            }
+            catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
             }
         }
+        finally { Files.deleteIfExists(temp); }
     }
-    
-    // ----------------------------------------------------------
-    /**
-     * Loads the pending tickets from a file and saves that to openTickets.
-     * @param filepath the file storing the pending tickets
-     * @throws IOException
-     */
-    public void loadPendingTickets(String filepath) throws IOException {
-        
-        File f = new File(filepath);
-        
-        if(!f.exists()) {
-            return;
+
+    /** Persist unfinished work as Open; interrupted timing samples are discarded. */
+    private static void writeTicket(BufferedWriter writer, Ticket ticket) throws IOException {
+        writer.write(csv(ticket.getId()) + "," + csv(ticket.getCategory()) + ","
+            + csv(ticket.getDescription()) + "," + csv(ticket.getSeverity()) + "," + csv("Open"));
+        writer.newLine();
+    }
+
+    private static Path checkedPath(String filepath) throws IOException {
+        if (filepath == null || filepath.trim().isEmpty()) {
+            throw new IOException("File path must not be blank.");
         }
-        
-        Queue<Ticket> loadedTickets = new Queue<>();
-        List<String> loadedIds = new ArrayList<>();
-        Ticket loadedCurrentTicket = null;
-        
-        try (PushbackReader reader = new PushbackReader(new FileReader(f), 1)) {
+        try { return Paths.get(filepath); }
+        catch (InvalidPathException e) { throw new IOException("Invalid file path.", e); }
+    }
+
+    /** Validates an entire file before replacing queued state. Never interrupts active work. */
+    public void loadPendingTickets(String filepath) throws IOException {
+        Path file = checkedPath(filepath);
+        if (!Files.exists(file)) { return; }
+        if (currentTicket != null) { throw new IOException("Cannot load while a ticket is active."); }
+        Queue<Ticket> loaded = new Queue<>();
+        List<Ticket> fileTickets = new ArrayList<>();
+        List<String> ids = new ArrayList<>();
+        Ticket interrupted = null;
+        try (PushbackReader reader = new PushbackReader(Files.newBufferedReader(file, StandardCharsets.UTF_8), 1)) {
             List<String> parts;
             while ((parts = readRecord(reader)) != null) {
-                if (parts.size() != 5) {
-                    throw new IOException("Malformed ticket data.");
-                }
-                Ticket t;
-                String status;
-                
+                if (parts.size() != 5) { throw new IOException("Malformed ticket data."); }
+                Ticket ticket;
+                String status = parts.get(4).trim();
                 try {
-                    t = new Ticket(parts.get(0), parts.get(1), parts.get(2), 
-                        parts.get(3));
-                    status = parts.get(4).trim();
-
-                    if (!status.equals("Open") && 
-                        !status.equals("In progress")) {
-                        throw new IllegalArgumentException
-                        ("Invalid ticket status.");
+                    ticket = new Ticket(parts.get(0), parts.get(1), parts.get(2), parts.get(3), clock);
+                    if (!status.equals("Open") && !status.equalsIgnoreCase("In Progress")) {
+                        throw new IllegalArgumentException("Invalid pending ticket status.");
                     }
-
-                    t.updateStatus(status);
                 }
-                catch (IllegalArgumentException e) {
-                    throw new IOException("Invalid ticket data.", e);
-                }
-                
-                boolean completedId = false;
-
+                catch (IllegalArgumentException e) { throw new IOException("Invalid ticket data.", e); }
+                if (ids.contains(ticket.getId())) { throw new IOException("Duplicate ticket ID."); }
                 for (Ticket completed : completedTickets) {
-                    completedId |= completed.getId().equals(t.getId());
+                    if (completed.getId().equals(ticket.getId())) { throw new IOException("Duplicate completed ticket ID."); }
                 }
-
-                boolean currentId = currentTicket != null
-                    && currentTicket.getId().equals(t.getId());
-
-                if (loadedIds.contains(t.getId()) || completedId || currentId) {
-                    throw new IOException("Duplicate ticket ID.");
+                ids.add(ticket.getId());
+                if (status.equalsIgnoreCase("In Progress")) {
+                    if (interrupted != null) { throw new IOException("Multiple active tickets in save file."); }
+                    interrupted = ticket;
                 }
-                
-                loadedIds.add(t.getId());
-
-                if (status.equals("Open")) {
-                    loadedTickets.enqueue(t);
-                } else {
-                    if (loadedCurrentTicket != null) {
-                        throw new IOException
-                        ("Multiple tickets currently in progress.");
-                    }
-
-                    loadedCurrentTicket = t;
-                }
+                else { fileTickets.add(ticket); }
             }
         }
-
-        openTickets = loadedTickets;
-        currentTicket = loadedCurrentTicket;
+        // Also accepts Vivaan's older format, which wrote the active record last.
+        if (interrupted != null) { loaded.enqueue(interrupted); }
+        for (Ticket ticket : fileTickets) { loaded.enqueue(ticket); }
+        openTickets = loaded;
     }
-    
+
+    /** Current active ticket, or null if none. */
+    public Ticket getCurrentTicket() { return currentTicket; }
+
+    /** Average completed processing seconds, or -1 if no samples exist. */
+    public long getAverageResolutionTime() { return timing.getAverageResolutionTime(); }
+
+    /** Pending-ticket wait in seconds; validates ID even if timing is unavailable. */
+    public long getEstimatedWaitTime(String id) {
+        Long elapsed = currentTicket == null ? null : currentTicket.getElapsedProcessingSeconds();
+        return timing.getEstimatedWaitTime(getPendingTickets(), id, elapsed);
+    }
+
+    /** Compatibility driver operation; the user menu uses start and complete separately. */
+    public Ticket processNextTicket() {
+        startNextTicket();
+        return completeCurrentTicket();
+    }
+
     private static String csv(String value) {
         return "\"" + value.replace("\"", "\"\"") + "\"";
     }

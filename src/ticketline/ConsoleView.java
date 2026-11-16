@@ -234,7 +234,7 @@ public class ConsoleView
                 result.append("Description: ").append(ticket[2]).append("\n");
                 result.append("Priority: ").append(ticket[3]).append("\n");
                 result.append("Status: ").append(ticket[4]).append("\n");
-                result.append("Estimated Wait: ").append(ticket[5])
+                result.append("Estimated Wait: ").append(ticket.length > 5 ? ticket[5] : "Not enough data.")
                     .append("\n");
             }
         }

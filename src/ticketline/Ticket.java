@@ -1,8 +1,8 @@
 package ticketline;
 
-import java.time.Instant;
-import java.time.Duration;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 
 // -------------------------------------------------------------------------
 /**
@@ -18,9 +18,9 @@ public class Ticket implements Comparable<Ticket> {
     private String description;
     private String status;
     private String severity;
+    private final Clock clock;
     private Instant startTime;
     private Instant completionTime;
-    private Clock clock;
     
     // ----------------------------------------------------------
     /**
@@ -34,43 +34,25 @@ public class Ticket implements Comparable<Ticket> {
     public Ticket(String i, String c, String d, String s) {
         this(i, c, d, s, Clock.systemUTC());
     }
-    
-    // ----------------------------------------------------------
-    /**
-     * Create a new Ticket object.
-     * @param i the id of the ticket.
-     * @param c the category of the ticket.
-     * @param d the description of the ticket.
-     * @param s the severity of the ticket.
-     * @param cl the clock used to measure ticket timestamps.
-     * @throws IllegalArgumentException if i, c, d, s, and/or cl are invalid
-     */
+
+    /** Uses an injectable clock so timing tests need no real waiting. */
     public Ticket(String i, String c, String d, String s, Clock cl) {
-        if (i == null || i.trim().isEmpty()) {
-            throw new IllegalArgumentException("Invalid ID.");
-        }
-        
-        if (c == null || c.trim().isEmpty()) {
-            throw new IllegalArgumentException("Invalid category.");
-        }
-        
-        if (d == null || d.trim().isEmpty()) {
-            throw new IllegalArgumentException("Invalid description.");
-        }
-        
-        if (s == null || s.trim().isEmpty()) {
-            throw new IllegalArgumentException("Invalid severity.");
-        }
-        if (cl == null) {
-            throw new IllegalArgumentException("Clock cannot be null.");
-        }
-        
-        id = i;
-        category = c;
-        description = d;
-        severity = s;
-        status = "Open";
+        if (cl == null) { throw new IllegalArgumentException("Clock cannot be null."); }
         clock = cl;
+        
+        id = normalizeId(i);
+        category = requireText(c, "category");
+        if (!(category.equalsIgnoreCase("Hardware")
+            || category.equalsIgnoreCase("Software")
+            || category.equalsIgnoreCase("Network")
+            || category.equalsIgnoreCase("Account")
+            || category.equalsIgnoreCase("Other"))) {
+            throw new IllegalArgumentException("Choose Hardware, Software, Network, Account, or Other.");
+        }
+        description = requireText(d, "description");
+        severity = requireText(s, "severity");
+        getSeverityValue(severity);
+        status = "Open";
     }
     
     // ----------------------------------------------------------
@@ -125,11 +107,7 @@ public class Ticket implements Comparable<Ticket> {
      * @throws IllegalArgumentException if the new description is null or empty
      */
     public void updateDescription(String newDesc) {
-        if(newDesc == null || newDesc.isEmpty()) {
-            throw new IllegalArgumentException("Invalid description.");
-        }
-        
-        description = newDesc;
+        description = requireText(newDesc, "description");
     }
     
     // ----------------------------------------------------------
@@ -139,12 +117,12 @@ public class Ticket implements Comparable<Ticket> {
      * @throws IllegalArgumentException if the new status is null or empty
      */
     public void updateStatus(String newStatus) {
-        if (newStatus == null || !(newStatus.equals("Open") || 
-            newStatus.equals("In progress") || newStatus.equals("Closed"))) {
+        String value = requireText(newStatus, "status");
+        if (!value.equals("Open") && !value.equals("In Progress")
+            && !value.equals("Closed")) {
             throw new IllegalArgumentException("Invalid status.");
         }
-        
-        status = newStatus;
+        status = value;
     }
 
     // ----------------------------------------------------------
@@ -171,7 +149,7 @@ public class Ticket implements Comparable<Ticket> {
      * "high", or "critical"
      */
     private int getSeverityValue(String sev) {
-        switch (sev.trim().toLowerCase()) {
+        switch (sev.toLowerCase(java.util.Locale.ROOT)) {
             case "low":
                 return 1;
             case "medium":
@@ -184,64 +162,64 @@ public class Ticket implements Comparable<Ticket> {
                 throw new IllegalArgumentException("Invalid severity.");
         }
     }
-    
-    // ----------------------------------------------------------
-    /**
-     * Starts processing the ticket.
-     * @throws IllegalStateException if the ticket has already begun/finished
-     * processing
-     */
-    public void startProcessing() {
-        if (completionTime != null) {
-            throw new IllegalStateException
-            ("Ticket has already been processed.");
+    /** Normalizes a user ID so 001 and 1 identify the same ticket. */
+    static String normalizeId(String value) {
+        try {
+            int number = Integer.parseInt(requireText(value, "ID"));
+            if (number > 0) {
+                return String.valueOf(number);
+            }
         }
-        if (startTime != null) {
-            throw new IllegalStateException
-            ("Ticket is already being processed.");
+        catch (NumberFormatException e) {
+            // Give the caller the same validation error for every invalid ID.
         }
-        
-        startTime = Instant.now(clock);
-        updateStatus("In progress");
+        throw new IllegalArgumentException("Ticket ID must be a positive whole number.");
     }
-    
-    // ----------------------------------------------------------
-    /**
-     * Finishes processing the ticket.
-     * @throws IllegalStateException if the ticket hasn't begun processing or
-     * if it has already finished
-     */
+
+    private static String requireText(String value, String field) {
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalArgumentException("Invalid " + field + ".");
+        }
+        return value.trim();
+    }
+
+    /** Begins Vivaan's ticket lifecycle; a ticket may start only once. */
+    public void startProcessing() {
+        if (startTime != null || !"Open".equals(status)) {
+            throw new IllegalStateException("Ticket has already started or finished.");
+        }
+        startTime = clock.instant();
+        updateStatus("In Progress");
+    }
+
+    /** Completes processing; a backward clock is rejected without closing it. */
     public void completeProcessing() {
-        if (startTime == null) {
-            throw new IllegalStateException
-            ("Ticket must start processing first.");
+        if (startTime == null || completionTime != null
+            || !"In Progress".equals(status)) {
+            throw new IllegalStateException("Ticket must be active to complete.");
         }
-        if (completionTime != null) {
-            throw new IllegalStateException
-            ("Ticket has already finished processing.");
+        Instant now = clock.instant();
+        if (now.isBefore(startTime)) {
+            throw new IllegalStateException("Clock moved before processing started.");
         }
-        
-        completionTime = Instant.now(clock);
+        completionTime = now;
         updateStatus("Closed");
     }
-    
-    // ----------------------------------------------------------
-    /**
-     * Returns the time elapsed between the ticket processing began and when it
-     * finished.
-     * @return duration between startTime and completionTime
-     * @throws IllegalStateException if startTime and/or completionTime are null
-     */
+
+    /** Returns duration only after the ticket has successfully completed. */
     public Duration getResolutionDuration() {
-        if (startTime == null) {
-            throw new IllegalStateException
-            ("Ticket must start processing first.");
+        if (startTime == null || completionTime == null) {
+            throw new IllegalStateException("Ticket must finish processing first.");
         }
-        if (completionTime == null) {
-            throw new IllegalStateException
-            ("Ticket must finish processing first.");
-        }
-        
         return Duration.between(startTime, completionTime);
+    }
+
+    /** Returns elapsed whole seconds, clamped to zero if the clock moves back. */
+    public long getElapsedProcessingSeconds() {
+        if (startTime == null) {
+            throw new IllegalStateException("Ticket must start processing first.");
+        }
+        Instant end = completionTime == null ? clock.instant() : completionTime;
+        return Math.max(0, Duration.between(startTime, end).getSeconds());
     }
 }

@@ -169,6 +169,7 @@ public class TicketController {
      * time for each as the sixth column.
      */
     public void handleViewPending() {
+        showCurrentTicket();
         List<Ticket> pending = model.getPendingTickets();
         if (pending.isEmpty()) {
             view.displayMessage(NO_PENDING_MESSAGE);
@@ -207,6 +208,11 @@ public class TicketController {
      * The ticket is finished separately by handleCompleteCurrent().
      */
     public void handleProcessNext() {
+        if (model.getCurrentTicket() != null) {
+            view.displayError("Already processing a ticket. Complete it with option 6 first.");
+            showCurrentTicket();
+            return;
+        }
         if (!model.hasPendingTickets()) {
             view.displayMessage(NO_PENDING_MESSAGE);
             return;
@@ -242,6 +248,7 @@ public class TicketController {
 
     /** Displays the average resolution time of completed tickets. */
     public void handleShowTimingSummary() {
+        showCurrentTicket();
         view.displayTimingSummary(formatDuration(model
             .getAverageResolutionTime()));
     }
@@ -320,6 +327,14 @@ public class TicketController {
             .getDescription(), ticket.getSeverity(), ticket.getStatus());
     }
 
+
+    private void showCurrentTicket() {
+        Ticket current = model.getCurrentTicket();
+        if (current != null) {
+            view.displayCurrentTicket(current.getId(), current.getCategory(),
+                current.getDescription(), current.getSeverity(), current.getStatus());
+        }
+    }
 
     /**
      * Turns a duration in seconds into display text. A negative value means

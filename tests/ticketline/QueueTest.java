@@ -131,4 +131,25 @@ public class QueueTest extends TestCase {
         assertEquals(2, queue.size());
         assertEquals("2", queue.peek().getId());
     }
+    /** Checks order after alternating insertions and removals. */
+    public void testInterleavedEnqueuesAndDequeues() {
+        queue.enqueue(ticket("1", "low"));
+        queue.enqueue(ticket("2", "high"));
+        assertEquals("2", queue.dequeue().getId());
+        queue.enqueue(ticket("3", "medium"));
+        queue.enqueue(ticket("4", "critical"));
+        queue.enqueue(ticket("5", "medium"));
+        assertEquals("4", queue.dequeue().getId());
+        assertEquals("3", queue.peek().getId());
+        assertEquals(3, queue.size());
+        assertEquals("3", queue.dequeue().getId());
+        queue.enqueue(ticket("6", "high"));
+        assertEquals("6", queue.dequeue().getId());
+        assertEquals("5", queue.dequeue().getId());
+        assertEquals("1", queue.dequeue().getId());
+        assertTrue(queue.isEmpty());
+        queue.enqueue(ticket("7", "low"));
+        assertEquals("7", queue.dequeue().getId());
+        assertEquals(0, queue.size());
+    }
 }

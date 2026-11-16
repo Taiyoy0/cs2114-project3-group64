@@ -39,7 +39,7 @@ public class ConsoleIntegrationTest extends TestCase {
 
     public void testFullMvpAndRestart() throws Exception {
         run("1\n1\nSoftware\nApp, won't open\nlow\n"
-            + "1\n2\nNetwork\nOffice down\ncritical\n2\n3\n4\n5\n", true);
+            + "1\n2\nNetwork\nOffice down\ncritical\n2\n3\n4\n6\n5\n", true);
         assertEquals(1, model.getPendingTickets().size());
         assertEquals("2", model.getCompletedTickets().get(0).getId());
         assertEquals("Closed", model.getCompletedTickets().get(0).getStatus());
@@ -82,7 +82,7 @@ public class ConsoleIntegrationTest extends TestCase {
 
     public void testDuplicatePendingAndCompletedId() throws Exception {
         run("1\n1\nOther\na\nlow\n"
-            + "1\n001\nOther\nb\nhigh\nn\n4\n"
+            + "1\n001\nOther\nb\nhigh\nn\n4\n6\n"
             + "1\n1\nOther\nc\nlow\nn\n5\n", true);
         assertEquals(1, model.getCompletedTickets().size());
         assertFalse(model.hasPendingTickets());
@@ -113,5 +113,61 @@ public class ConsoleIntegrationTest extends TestCase {
         run("5\n", true);
         assertTrue(text().contains("Could not load saved tickets"));
         assertFalse(model.hasPendingTickets());
+    }
+    public void testTimingWorkflowWithControlledClock() throws Exception {
+        HelpDeskModelTest.MutableClock clock = new HelpDeskModelTest.MutableClock();
+        model = new HelpDeskModel(clock);
+        model.submitTicket("1", "Other", "First", "critical");
+        model.submitTicket("2", "Other", "Second", "high");
+        model.submitTicket("3", "Other", "Third", "low");
+        run("7\n4\n", false); // EOF saves active work, but leaves in-memory state testable.
+        assertEquals("1", model.getCurrentTicket().getId());
+        assertTrue(text().contains("Not enough data."));
+        clock.advance(60);
+        output.reset();
+        run("6\n7\n2\n4\n", false);
+        assertEquals(60L, model.getAverageResolutionTime());
+        assertEquals("2", model.getCurrentTicket().getId());
+        assertTrue(text().contains("Average Resolution Time: 1m 0s"));
+        assertTrue(text().contains("Estimated Wait: 1m 0s"));
+        clock.advance(20); output.reset();
+        run("2\n5\n", false);
+        assertTrue(text().contains("CURRENT TICKET"));
+        assertTrue(text().contains("Estimated Wait: 0m 40s"));
+    }
+
+    public void testActiveTicketSurvivesConsoleExitAndRestart() throws Exception {
+        run("1\n1\nOther\nfirst\nhigh\n1\n2\nOther\nsecond\nhigh\n4\n5\n", true);
+        assertEquals("1", model.getCurrentTicket().getId());
+        model = new HelpDeskModel(); output.reset();
+        run("2\n4\n6\n5\n", true);
+        assertNull(model.getCurrentTicket());
+        assertEquals("1", model.getCompletedTickets().get(0).getId());
+        assertEquals("2", model.peekNextTicket().getId());
+        assertTrue(text().contains("successfully processed"));
+    }
+
+    public void testDoubleStartAndCompleteWithoutActiveSurvive() throws Exception {
+        run("6\n1\n1\nOther\nfirst\nhigh\n1\n2\nOther\nsecond\nlow\n4\n4\n6\n6\n5\n", true);
+        assertEquals(1, model.getCompletedTickets().size());
+        assertEquals("2", model.peekNextTicket().getId());
+        assertTrue(text().contains("Already processing"));
+        assertTrue(text().contains("No ticket currently being processed"));
+    }
+
+    public void testDuplicateCurrentIdAndSingleActiveStartSurvive() throws Exception {
+        run("1\n1\nOther\noriginal\nhigh\n4\n4\n1\n001\nOther\noverwrite\nlow\nn\n2\n7\n5\n", true);
+        assertEquals("original", model.getCurrentTicket().getDescription());
+        assertTrue(model.getPendingTickets().isEmpty());
+        assertTrue(text().contains("ID already exists"));
+        assertTrue(text().contains("Already processing"));
+        assertTrue(text().contains("CURRENT TICKET"));
+    }
+
+    public void testCompletedIdCannotOverwriteOriginalDescription() throws Exception {
+        run("1\n1\nOther\noriginal\nhigh\n4\n6\n1\n001\nOther\nreplacement\ncritical\nn\n5\n", true);
+        assertEquals("original", model.getCompletedTickets().get(0).getDescription());
+        assertFalse(model.hasPendingTickets());
+        assertTrue(text().contains("ID already exists"));
     }
 }
