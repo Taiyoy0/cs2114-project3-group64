@@ -1,157 +1,158 @@
-# TicketLine
+# TicketLine — Prototype 2
 
-TicketLine is a console prototype for support staff to submit, view, and process support tickets. A custom linked priority queue handles critical tickets before high, medium, and low tickets. Equal-severity tickets retain submission order. Pending tickets are saved on exit and restored when the application restarts.
+TicketLine helps support staff submit, prioritize, start, and complete support tickets. Critical tickets come before high, medium, and low tickets; equal-severity tickets retain submission order. The added feature tracks processing durations and estimates how long pending tickets will wait before processing starts.
 
 ## How to Run
 
-### Console prototype in Eclipse
+### Eclipse
 
-1. In Eclipse, choose **File > Import > General > Existing Projects into Workspace**. Select the project folder, or select the ZIP using **Select archive file**, then click **Finish**.
-2. Use Java 8 or newer. The `lib` folder includes JUnit 4 and Hamcrest, so no separate JUnit library setup is required.
-3. Expand **src > ticketline**, right-click **TicketController.java**, and choose **Run As > Java Application**.
+1. Import the project with **File > Import > General > Existing Projects into Workspace**. Use Java 8 or newer.
+2. The project includes `src`, `tests`, and the JUnit/Hamcrest libraries in `lib`.
+3. Right-click `src/ticketline/TicketController.java` and choose **Run As > Java Application**.
 
-If Eclipse says the project already exists, it has detected another project with the same internal name. The replacement archive `TicketLine-ready.zip` uses the project name **TicketLine-Integrated** to avoid the earlier name conflict.
+Use these menu choices:
 
-The menu supports submitting tickets, viewing pending tickets, viewing the next ticket, processing the next ticket, and saving/exiting. Enter category names as displayed, rather than numbers. Categories are Hardware, Software, Network, Account, and Other; severities are low, medium, high, and critical. Categories and severity are case insensitive. IDs must be positive whole numbers.
+| Option | Action |
+|---|---|
+| 1 | Submit a ticket using a unique positive numeric ID, category, description, and severity. |
+| 2 | View pending tickets in priority order and their estimated waits. |
+| 3 | View the next pending ticket without removing it. |
+| 4 | Start processing the next ticket. It becomes the one active ticket. |
+| 5 | Save unfinished tickets and exit. |
+| 6 | Complete the active ticket and record its processing duration. |
+| 7 | View the average processing duration of completed tickets. |
 
-The application uses `tickets.txt` in its working directory. To check persistence manually, submit a ticket, choose Exit, restart from the same directory, and view pending tickets. Completed tickets are kept for the current session only.
+Categories are Hardware, Software, Network, Account, and Other. Severity is low, medium, high, or critical. Category and severity are case insensitive. IDs such as `001` and `1` identify the same ticket.
 
-### Run the model without the view
+**To save, type `5` (Exit) in the menu and press Enter.** Closing the Console tab does not trigger saving; Eclipse's red Stop button terminates the app without triggering saving. Restart from the same working directory to restore `tickets.txt`.
 
-Run `tests/ticketline/ModelDemo.java` as a Java application. It creates three tickets, prints their priority order, processes one, and saves/reloads the remaining tickets using a temporary file.
+In the completed design, pending and unfinished active tickets are restored as pending. An interrupted active ticket keeps its place before later tickets of equal severity and starts a new timing sample when processed again. Completed-ticket history and timing statistics cover only the current session.
 
-Run `tests/ticketline/ModelChecks.java` as a Java application to execute the 45 standalone model checks. Neither file requires ConsoleView, TicketController, keyboard input, or the real `tickets.txt` file.
+### Compile and run from a terminal
 
-### Run the JUnit tests
-
-Run `ConsoleViewTest.java` and `ConsoleIntegrationTest.java` in `tests/ticketline` as JUnit tests. The first checks Samuel's display methods; the second exercises the real view/controller/model together using supplied input and captured output. Integration tests use temporary save locations and do not overwrite a user's save file.
-
-### Command line
-
-With a JDK, compile and run the application:
+With a JDK installed:
 
 ```sh
-javac -d bin src/ticketline/*.java
+javac -cp "lib/*" -d bin src/ticketline/*.java tests/ticketline/*.java
 java -cp bin ticketline.TicketController
 ```
 
-For the standalone model drivers:
+### Run tests
+
+In Eclipse, right-click each `*Test.java` file under `tests/ticketline` and choose **Run As > JUnit Test**. Run the model and timing tests independently of ConsoleView. The separate console integration tests check the connected layers.
+
+To run all six JUnit test classes from a terminal:
 
 ```sh
-javac -d bin src/ticketline/Ticket.java src/ticketline/Queue.java src/ticketline/HelpDeskModel.java tests/ticketline/ModelDemo.java tests/ticketline/ModelChecks.java
-java -cp bin ticketline.ModelDemo
-java -cp bin ticketline.ModelChecks
+java -cp "bin:lib/*" org.junit.runner.JUnitCore ticketline.TicketTest ticketline.HelpDeskModelTest ticketline.QueueTest ticketline.ResolutionTimeCalculatorTest ticketline.ConsoleViewTest ticketline.ConsoleIntegrationTest
 ```
 
-JUnit tests require JUnit 4 and Hamcrest on the classpath. Both JAR files are included in `lib` and referenced directly by the Eclipse project; no JUnit container setup is needed. No external course-support projects are required by this source.
+On Windows, use `"bin;lib/*"` instead of `"bin:lib/*"`.
 
-## Verification Results
+`ModelDemo` and `ModelChecks` remain Java applications rather than JUnit tests. They exercise the original immediate-processing API directly. They do not by themselves demonstrate the new start/complete lifecycle.
 
-The integrated source was compiled for Java 8 compatibility using the Eclipse Java compiler and executed on Java 21.
+## Timing Rules
 
-- **45 standalone model checks passed.** These cover priority and equal-priority FIFO, duplicate pending/completed IDs, invalid fields, empty queues, processing, snapshot membership, and save/load behavior, including malformed files and descriptions with commas, quotes, or newlines.
-- **20 JUnit tests passed:** 10 view tests and 10 integration tests.
-- The integrated MVP path was tested: submit tickets, display pending tickets, inspect next, process a ticket, save/exit, and load into a new application session.
-- Additional interaction tests cover invalid menu/ID input, invalid category/severity, blank descriptions, retry/cancel, duplicate IDs, empty operations, malformed save data, input exhaustion, and save failures.
-- ModelDemo was executed separately to demonstrate the model without any view.
+The average is the total processing duration divided by the number of successfully completed timing samples, rounded down to whole seconds. Zero-second samples are valid. With no samples, the model returns `-1`, and the controller displays **Not enough data.**
+
+For a pending ticket:
+
+**Estimated wait = active ticket's estimated remaining time + average duration × number of pending tickets ahead.**
+
+The active ticket's remaining estimate is `max(0, average − elapsed processing time)`. With no active ticket it is zero. Queue position uses the existing severity order and equal-severity FIFO. Estimates are recalculated when displayed, are not guarantees, and assume one staff member and no future arrivals. A new high-priority arrival can increase another ticket's estimate. Missing, completed, or active ticket IDs are rejected because this calculation applies only to pending tickets.
+
+## Verification
+
+| Check | Result |
+|---|---|
+| TicketTest | 8 JUnit tests passed. |
+| HelpDeskModelTest | 25 JUnit tests passed. |
+| ConsoleViewTest | 15 JUnit tests passed. |
+| ConsoleIntegrationTest | 15 JUnit tests passed. |
+| ResolutionTimeCalculatorTest | 15 JUnit tests passed. |
+| QueueTest | 11 JUnit tests passed, including interleaved enqueue/dequeue ordering. |
+| ModelChecks | 45 standalone model checks passed. |
+| Total | 89 JUnit tests passed and 45 standalone model checks passed. |
+
 
 ## Reflection
 
-Integration revealed mismatched method names and package locations, so we aligned the controller calls and placed the view and its tests in the ticketline package. We added missing prompts to support severity selection and error recovery. Injectable input/output streams allowed automated console tests without keyboard input. Validation fixes prevented duplicate IDs and invalid ticket data. Quoted CSV preserved descriptions containing commas, quotes, and newlines, while temporary loading prevented malformed files from partially changing model state
+### How did the design absorb the change?
 
-### What changed from our specification?
+The feature touched Ticket, HelpDeskModel, TicketController, and ConsoleView, as predicted in Deliverable 3. Ticket gained timing information. HelpDeskModel gained active-ticket lifecycle operations and coordinated timing and persistence. TicketController connected menu actions to those operations and formatted durations. ConsoleView gained start/complete actions and timing displays.
 
-Our Revised Scope moved severity-based priority into the MVP. The implementation follows that decision using Ticket's comparison logic and our custom linked Queue, while preserving FIFO within each severity. Tickets now follow FIFO within each severity level, rather than across all tickets.
+We also added ResolutionTimeCalculator in the model layer. This was an addition to the Deliverable 3 class prediction: separating the calculations let Ari implement and test the math while Vivaan developed ticket timing and lifecycle behavior. It records completed samples and calculates waits from a supplied pending list and elapsed duration. It does not control tickets or store a copy of the queue.
 
-The spec mixed enum fields and String-based method signatures. We retained the existing String fields but validate category, severity, and status. The accepted category list was defined during integration because the spec did not enumerate it. IDs are stored as Strings, matching the Data & State section, but must represent positive whole numbers; leading zeroes and surrounding spaces are normalized so `001` and `1` are treated as the same ID.
+Queue.java and its internal Node did not need feature changes, matching our prediction. Existing enqueue/dequeue/peek behavior already supplied the correct processing order. We expanded QueueTest to check order when enqueues and dequeues are interleaved. Ticket ID/category/description validation also remained unchanged.
 
-The controller now calls the model's actual `peekNextTicket()`, `savePendingTickets()`, and `loadPendingTickets()` methods and uses `Ticket.getId()`. Ticket submission includes severity as its fourth argument. Samuel's view and view test were moved into the `ticketline` package. The view's unused controller reference was removed, a no-argument constructor and injectable input/output streams were supplied, and severity and yes/no prompts were added. The controller uses Samuel's input and display methods instead of replacing his view. Two output messages were aligned with his tests, and processed tickets use a generic details heading rather than a next-ticket heading.
+### Did the change cross the model/view line?
 
-Validation stays with the responsible layer: Ticket checks field/update values, HelpDeskModel checks duplicate IDs, Queue checks null entries and empty operations, and TicketController checks menu/numeric input. String equality and whitespace handling were corrected. The view collects raw input and displays results; it does not validate ticket rules or access model objects.
+The model owns the queue, active ticket, completed tickets, and timing statistics. The view keeps no copy of that state. The controller fetches current model values for each display and passes plain strings and transient display rows to the view. The view learned how to display a wait estimate and timing summary, but it did not learn queue traversal, timing formulas, file parsing, or ticket lifecycle rules. Timing therefore flowed through the existing MVC boundary without moving business rules into the view. The calculator has no console, view, or controller dependency.
 
-Persistence now uses quoted CSV for descriptions containing commas, quotes, or newlines. Loading accepts the earlier unquoted five-field format, validates a temporary queue, and replaces pending state only after the entire file is valid. Missing files leave state unchanged, and invalid loads report errors without partially updating the queue.
+### What changed from the Deliverable3 plan, and why?
 
-We added ModelDemo and ModelChecks to demonstrate model independence and check its behavior. Samuel's JUnit view tests were retained, and ConsoleIntegrationTest was added for the combined application.
+We kept the same feature: resolution-time tracking and estimated waits. The model retains the public facade methods getAverageResolutionTime() and getEstimatedWaitTime(String id), while delegating arithmetic to ResolutionTimeCalculator. Controller handlers use the existing handleProcessNext(), handleCompleteCurrent(), and handleShowTimingSummary() naming rather than the preliminary names in D3.
 
-### Did the model really stand alone?
+The controller uses `long` whole seconds and a `-1` unavailable result. Keeping that contract consistent avoids mixing milliseconds with displayed seconds. Tests use supplied durations and a controllable lifecycle clock rather than waiting in real time. Whole-second averages round down, which keeps formatting and assertions predictable.
 
-Yes. Ticket, Queue, and HelpDeskModel compile and run with the standalone drivers without ConsoleView or TicketController. The model does not print interface messages, read keyboard input, or reference the view. It returns tickets/results or throws exceptions. The controller translates those into display values and messages.
+Persistence returns unfinished active tickets to pending on restart rather than counting interrupted work as a completed timing sample. Timing statistics remain session-only, as planned. This avoids treating time while the application was closed as staff processing time.
 
-### What happened to our unknowns?
-
-The prototype demonstrates how to order tickets by severity, preserve equal-severity order, move a pending ticket into completed state, validate duplicate IDs, save/reload pending tickets, and connect the MVC classes through matching methods. Those implementation questions have working code and checks. Remaining questions include how to track an active ticket, calculate reliable wait estimates, and preserve unfinished work across restarts. We will address these in Deliverable 4.
+Integration required startNextTicket() and completeCurrentTicket() to return the affected Ticket so the controller could display it. We separated the active ticket from getPendingTickets() and hasPendingTickets() so wait estimates apply only to queued work. Saving and loading were aligned to restore interrupted tickets as Open, preserve their order among equal-priority tickets, and discard unfinished timing samples. We also restored the existing input-validation rules omitted during the timestamp changes and removed obsolete root-level view copies. These fixes connected the team’s classes without changing Queue.java.
 
 ### What does not work yet?
 
-Editing through the menu, average resolution time, and estimated wait times are not implemented (stretch goals). Completed tickets are not persisted, as the MVP requires only pending-ticket persistence. Consequently, ID uniqueness against completed tickets is session-only. 
+For the completed prototype, editing pending ticket descriptions and durable completed-ticket history remain outside scope. Statistics reset on restart. Estimates are approximate and do not model multiple staff, future arrivals, or per-category processing times. Saving requires menu option 5; there is no automatic save.
+
+### What design change would make the next feature cheaper?
+
+A small immutable ticket-display snapshot returned by HelpDeskModel would make future display features cheaper. Currently the controller constructs positional string rows. Named fields for ID, status, severity, and estimated wait would reduce mistakes when adding another displayed value and would avoid exposing mutable Ticket objects. The view could still render the supplied snapshot without owning or updating application state. This is a future improvement, not an implemented class.
 
 ## Next Steps
 
-### Remaining MVP work
+### Remaining work for the final build, in order
 
-All MVP features are complete: submitting tickets, viewing pending tickets, inspecting and processing the next ticket, and saving and restoring pending tickets. No MVP work remains. Deliverable 4 will focus on the additional feature below and its tests.
+1. **Vivaan:** Review the completed core model tests and address any newly discovered lifecycle or persistence issues.
+2. **Ari and Taiyo:** Review the passing controller integration tests and confirm the workflow in the team’s Eclipse environments.
+3. **Samuel and Taiyo:** Verify menu wording, current-state displays, retry behavior, and timing formatting on the integrated source.
+4. **All members:** Rehearse the timed demo, produce one clean final source/test/README submission, start discussing slide preparation/creation.
 
-### Deliverable 4 change feature
 
-We will add **resolution-time tracking and estimated wait times**. Staff will start a ticket and mark it completed separately. The model will record the processing duration, calculate the average duration of completed tickets, and estimate pending tickets' waits using their priority order. Before any tickets are completed, the app will display “Not enough data.” These statistics will initially cover the current session.
+### Stretch goals committed versus dropped
 
-This feature adds model state, calculations, and user actions accessible through the controller and view. It was not part of our MVP. The following method names are proposed; we will agree on their signatures before implementation and compare these predictions with the actual changes afterward.
+We have committed to resolution-time tracking and estimated waits, and made the severity priority a part of the revised MVP. Editing pending ticket descriptions is deferred potentially for Deliverable5. Multi-staff scheduling and persistent timing history are not planned for this build.
 
-### Predicted code changes
+### Three-minute demo plan
 
-| Class | Specific methods expected to change or be added |
+
+| Time | Action and evidence |
 |---|---|
-| Ticket | Add startProcessing(), completeProcessing(), and getResolutionDuration() to record timestamps and return processing duration. Use a controllable clock for reliable timing tests. |
-| HelpDeskModel | Add startNextTicket(), completeCurrentTicket(), getCurrentTicket(), getAverageResolutionTime(), and getEstimatedWaitTime(String id). Replace the immediate-completion workflow in processNextTicket() with separate start and complete operations. |
-| TicketController | Update start() menu routing and processNextTicket() handling. Add completeCurrentTicket() and showTimingSummary() handlers. Update viewPendingTickets() to supply wait estimates for display. |
-| ConsoleView | Update displayMenu() and displayPendingTickets(...). Add displayCurrentTicket(...) and displayTimingSummary(...) to show the active ticket and timing results. |
-| HelpDeskModel persistence | Update savePendingTickets() and loadPendingTickets() so an unfinished current ticket is preserved and restored without loss or duplication. On restart, return that ticket to pending, preserving its order among equal-priority tickets, and discard its interrupted timing sample. Continue accepting existing save files. |
+| 0:00–1:00 | Run TicketController; submit a low and two critical tickets. Show critical-first ordering, FIFO between critical tickets, and Not enough data before completion. |
+| 1:05–2:00 | Start the first critical ticket with option 4. After showing the current-ticket output and attempting another start, complete it with option 6. Show the summary with option 7 and updated waits with option 2. |
+| 2:05–2:30 | Demonstrate a duplicate ID and an invalid menu choice without crashing. |
+| 2:30–3:00 | Start another ticket, exit with option 5, restart, and show unfinished work restored correctly. Note that session timing statistics reset. |
 
-We expect Queue.enqueue(), dequeue(), peek(), isEmpty(), size(), and toList(), along with its internal Node, to remain unchanged because priority ordering already works. Ticket ID, category, and description validation should also remain unchanged.
 
-Wait estimates assume one staff member processes tickets at a time and no new tickets arrive. For a pending ticket, estimate the active ticket's remaining time as the average duration minus its elapsed processing time, with a minimum of zero, then add the average duration for each pending ticket ahead of it. Estimates will be recalculated when displayed and may change when higher-priority tickets arrive.
-
-### Stretch goals
-
-We commit to average resolution time and estimated wait times for Deliverable 4. Severity priority is already implemented in the revised MVP and will not be counted again as the new feature. Editing pending ticket descriptions is deferred so we can finish and test the timing non-trivial feature first.
-
-### New tests needed
-
-- startNextTicket(): starting a ticket removes it from pending and makes it current; an empty queue or an already-active ticket is rejected without changing state.
-- completeCurrentTicket(): completing a ticket clears the current ticket, adds it to completed, and records its duration; completing without an active ticket is rejected.
-- getAverageResolutionTime(): known durations produce the correct average; no completed tickets produces an unavailable result that the view displays as “Not enough data.”
-- getEstimatedWaitTime(String id): estimates follow priority order, include the active ticket's estimated remaining time, and never become negative. Missing, invalid, or completed IDs are rejected without changing state.
-- Save/load: an unfinished current ticket survives restart without duplication, returns to the correct pending position, and contributes no interrupted duration to the average. Existing save files still load.
-- Controller/view: verify start and complete menu actions, timing displays, invalid choices, and errors.
-- Regression: existing submission, duplicate-ID validation, priority ordering, and pending-ticket persistence still work.
-
-Timing tests will use a controllable clock so they do not require real waiting. Model tests will run without the view.
-
-### Who does what? (proposed assignments)
-
-| Member | Deliverable 4 responsibility |
-|---|---|
-| Ari Gallo | Implement getAverageResolutionTime() and getEstimatedWaitTime(String id) and their tests; integrate the feature, run end-to-end tests, and update the README. |
-| Vivaan Dutt | Implement ticket timestamps, model start/complete operations, persistence updates, and related model tests. |
-| Taiyo Lloyd | Implement controller menu routing, start/complete handlers, timing-result handling, and controller error-handling tests. |
-| Samuel Abiy | Update the menu, current-ticket and timing displays, and view tests. |
-
-We will agree on method signatures first. Once the model operations and view methods are ready, Taiyo will connect them through the controller. Ari will then integrate and test the complete workflow and run regression tests before submission.
 
 ## Attribution
 
 | Class or test file | Contributors and contribution |
 |---|---|
-| Ticket.java | Vivaan Dutt wrote the original class. |
-| Queue.java, including internal Node | Vivaan Dutt wrote the linked priority queue. |
-| QueueTest.java | Ari Gallo added the queue test class, created with GenAI assistance, to test core queue methods, priority ordering, equal-priority FIFO, and error cases. |
-| HelpDeskModel.java | Vivaan Dutt wrote the original model. |
-| TicketController.java | Taiyo Lloyd wrote the original controller. |
-| ConsoleView.java | Samuel Abiy wrote the original view. |
-| ConsoleViewTest.java | Samuel Abiy wrote the 10 original JUnit display tests. |
-| ModelChecks.java | Ari wrote; 45 model checks executed successfully. |
-| ModelDemo.java | Reviewed with GenAI for Ari's integration work and executed independently of the view. |
-| ConsoleIntegrationTest.java | Reviewed with GenAI for Ari's integration work; 10 combined console/controller/model tests executed successfully. |
+| Ticket.java | Vivaan Dutt wrote the original class and added processing timestamps and duration tracking for Deliverable4 |
+| Queue.java, including Node | Vivaan Dutt wrote the linked priority queue. Its existing priority and FIFO behavior supported the timing feature without changes to the class. |
+| HelpDeskModel.java | Vivaan Dutt wrote the original model and added current-ticket tracking, start/complete operations, and unfinished-ticket persistence. |
+| TicketController.java | Taiyo Lloyd wrote the original controller and added Deliverable4 handlers for starting tickets, completing the current ticket, displaying timing summaries, and requesting wait estimates. |
+| ConsoleView.java | Samuel Abiy wrote the original view and added Deliverable4 menu options, current-ticket displays, estimated waits, and timing summaries. |
+| ConsoleViewTest.java | Samuel Abiy wrote the original display tests and updated them for the Deliverable4 menu and timing displays. |
+| ResolutionTimeCalculator.java | Ari developed the Deliverable4 average-resolution-time and estimated-wait calculations. |
+| TicketTest.java | Ari added direct ticket validation, lifecycle, and clock JUnit tests. |
+| HelpDeskModelTest.java, including nested MutableClock | Ari added direct model timing, lifecycle, persistence, and error-case JUnit tests. |
+| ResolutionTimeCalculatorTest.java | Ari added tests for timing calculations, unavailable data, invalid inputs, and changing queue order. |
+| QueueTest.java | Ari added the original queue tests and expanded them for Deliverable4 to verify ordering after interleaved enqueues and dequeues. |
+| ModelChecks.java | Ari added standalone checks for ticket validation, queue behavior, processing, and persistence. |
+| ModelDemo.java | Ari added a driver demonstrating model operations independently of the view. |
+| ConsoleIntegrationTest.java | Ari added integration tests and updated them for the separate start/complete workflow and timing feature. |
+
 
 ### GenAI note
-The team used GenAI tools as assistance, not as a substitute for understanding or reviewing the program. ChatGPT was used for debugging guidance, integration discussions in eclipse suggestions for JUnit tests, and save/load code for saving tickets, validation/persistence fixes. Additionally it was helpful when integration efforts weren't work. Each member’s individual AI use is documented in their separate AI note assignment on Canvas.
+
+The team used GenAI, such as ChatGPT & Claude, tools as assistance, not as a substitute for understanding or reviewing the program. ChatGPT was used for debugging guidance, integration discussions in eclipse suggestions for JUnit tests, and save/load code for saving tickets, validation/persistence fixes and timing calculation guidance. Additionally it was helpful when integration efforts weren't work from Deliverable 2 to 3 and Deliverable 3 to 4. Each member’s individual AI use is documented in their separate AI note assignment on Canvas.
