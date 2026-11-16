@@ -22,7 +22,8 @@ public class ConsoleViewTest
     @Override
     public void setUp()
     {
-        view = new ConsoleView(new java.io.ByteArrayInputStream(new byte[0]),
+        view = new ConsoleView(
+            new java.io.ByteArrayInputStream(new byte[0]),
             new java.io.PrintStream(new java.io.ByteArrayOutputStream()));
     }
 
@@ -38,7 +39,7 @@ public class ConsoleViewTest
         assertTrue(result.contains("1. Submit a Ticket"));
         assertTrue(result.contains("2. View Pending Tickets"));
         assertTrue(result.contains("3. View Next Ticket"));
-        assertTrue(result.contains("4. Process Next Ticket"));
+        assertTrue(result.contains("4. Start Processing Next Ticket"));
         assertTrue(result.contains("5. Exit"));
     }
 
@@ -160,5 +161,75 @@ public class ConsoleViewTest
 
         assertTrue(result.contains("Thank you for using TicketLine!"));
         assertTrue(result.contains("Goodbye."));
+    }
+
+
+    /**
+     * Tests that the menu contains the Deliverable 4 options.
+     */
+    public void testDisplayMenuDeliverable4()
+    {
+        String result = view.displayMenu();
+
+        assertTrue(result.contains("4. Start Processing Next Ticket"));
+        assertTrue(result.contains("6. Complete Current Ticket"));
+        assertTrue(result.contains("7. View Timing Summary"));
+    }
+
+
+    /**
+     * Tests displaying the current ticket.
+     */
+    public void testDisplayCurrentTicket()
+    {
+        String result = view.displayCurrentTicket(
+            "101",
+            "Software",
+            "Computer issue",
+            "High",
+            "Processing");
+
+        assertTrue(result.contains("CURRENT TICKET"));
+        assertTrue(result.contains("101"));
+        assertTrue(result.contains("Software"));
+        assertTrue(result.contains("Computer issue"));
+        assertTrue(result.contains("Processing"));
+    }
+
+
+    /**
+     * Tests displaying the timing summary.
+     */
+    public void testDisplayTimingSummary()
+    {
+        String result = view.displayTimingSummary("6m 07s");
+
+        assertTrue(result.contains("TIMING SUMMARY"));
+        assertTrue(result.contains("6m 07s"));
+    }
+
+
+    /**
+     * Tests displaying timing summary without completed tickets.
+     */
+    public void testDisplayTimingSummaryNoData()
+    {
+        String result = view.displayTimingSummary("Not enough data.");
+
+        assertTrue(result.contains("Not enough data."));
+    }
+
+
+    /**
+     * Tests displaying estimated wait times.
+     */
+    public void testDisplayPendingTicketsWithWait()
+    {
+        String[][] tickets = {
+            { "101", "Software", "Computer issue", "High", "Open", "6m 07s" } };
+
+        String result = view.displayPendingTickets(tickets);
+
+        assertTrue(result.contains("Estimated Wait: 06m 07s"));
     }
 }
