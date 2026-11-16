@@ -29,50 +29,71 @@ public class ConsoleView
     // ----------------------------------------------------------
     /**
      * Create a new ConsoleView object.
-     *
      */
 
-    public ConsoleView() {
+    public ConsoleView()
+    {
         this(System.in, System.out);
     }
 
-    /** Supplies streams for repeatable tests without changing global input/output. */
-    public ConsoleView(InputStream source, PrintStream destination) {
+
+    /**
+     * Supplies streams for repeatable tests without changing global
+     * input/output.
+     */
+    public ConsoleView(InputStream source, PrintStream destination)
+    {
         input = new Scanner(source);
         output = destination;
     }
 
-    private String readInput() {
-        if (!input.hasNextLine()) {
+
+    private String readInput()
+    {
+        if (!input.hasNextLine())
+        {
             inputExhausted = true;
             return null;
         }
         return input.nextLine();
     }
 
+
     /** Reports end of input without attempting another blocking read. */
-    public boolean isInputExhausted() { return inputExhausted; }
+    public boolean isInputExhausted()
+    {
+        return inputExhausted;
+    }
+
 
     /** Collects raw severity; validation belongs in the model. */
-    public String getSeverity() {
+    public String getSeverity()
+    {
         output.print("Severity (low, medium, high, critical): ");
         return readInput();
     }
 
+
     /** Displays a controller question and returns raw input. */
-    public String promptYesNo(String question) {
+    public String promptYesNo(String question)
+    {
         output.print(question + " ");
         return readInput();
     }
 
 
     /** Displays a completed ticket without labeling it as the next ticket. */
-    public String displayTicketDetails(String id, String category,
-        String description, String priority, String status) {
+    public String displayTicketDetails(
+        String id,
+        String category,
+        String description,
+        String priority,
+        String status)
+    {
         String result = "\n========== TICKET DETAILS ==========\n"
-            + "Ticket ID: " + id + "\nCategory: " + category
-            + "\nDescription: " + description + "\nPriority: " + priority
-            + "\nStatus: " + status + "\n=================================\n";
+            + "Ticket ID: " + id + "\nCategory: " + category + "\nDescription: "
+            + description + "\nPriority: " + priority + "\nStatus: " + status
+            + "\n=================================\n";
         output.print(result);
         return result;
     }
@@ -89,11 +110,13 @@ public class ConsoleView
 
     public String displayMenu()
     {
-        String result = "\n================================\n"
-            + "          TICKETLINE\n" + "================================\n"
-            + "1. Submit a Ticket\n" + "2. View Pending Tickets\n"
-            + "3. View Next Ticket\n" + "4. Process Next Ticket\n" + "5. Exit\n"
-            + "================================\n" + "Enter your choice: ";
+        String result =
+            "\n================================\n" + "          TICKETLINE\n"
+                + "================================\n" + "1. Submit a Ticket\n"
+                + "2. View Pending Tickets\n" + "3. View Next Ticket\n"
+                + "4. Start Processing Next Ticket\n" + "5. Exit\n"
+                + "6. Complete Current Ticket\n" + "7. View Timing Summary\n"
+                + "================================\n" + "Enter your choice: ";
 
         output.print(result);
         return result;
@@ -211,6 +234,8 @@ public class ConsoleView
                 result.append("Description: ").append(ticket[2]).append("\n");
                 result.append("Priority: ").append(ticket[3]).append("\n");
                 result.append("Status: ").append(ticket[4]).append("\n");
+                result.append("Estimated Wait: ").append(ticket[5])
+                    .append("\n");
             }
         }
 
@@ -253,6 +278,57 @@ public class ConsoleView
 
         output.print(result);
 
+        return result;
+    }
+
+
+    /**
+     * Displays the ticket currently being processed.
+     *
+     * @param id
+     *            Ticket ID
+     * @param category
+     *            Ticket category
+     * @param description
+     *            Ticket description
+     * @param priority
+     *            Ticket priority
+     * @param status
+     *            Ticket status
+     * @return The formatted current ticket information
+     */
+    public String displayCurrentTicket(
+        String id,
+        String category,
+        String description,
+        String priority,
+        String status)
+    {
+        String result = "\n========== CURRENT TICKET ==========\n"
+            + "Ticket ID: " + id + "\n" + "Category: " + category + "\n"
+            + "Description: " + description + "\n" + "Priority: " + priority
+            + "\n" + "Status: " + status + "\n"
+            + "====================================\n";
+
+        output.print(result);
+        return result;
+    }
+
+
+    /**
+     * Displays the average ticket resolution time.
+     *
+     * @param averageTime
+     *            The formatted average resolution time
+     * @return The timing summary
+     */
+    public String displayTimingSummary(String averageTime)
+    {
+        String result = "\n========== TIMING SUMMARY ==========\n"
+            + "Average Resolution Time: " + averageTime + "\n"
+            + "===================================\n";
+
+        output.print(result);
         return result;
     }
 
