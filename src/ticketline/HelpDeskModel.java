@@ -15,6 +15,7 @@ public class HelpDeskModel {
     
     private Queue<Ticket> openTickets;
     private List<Ticket> completedTickets;
+    private Ticket currentTicket;
     
     // ----------------------------------------------------------
     /**
@@ -69,6 +70,10 @@ public class HelpDeskModel {
             }
         }
         
+        if (currentTicket != null && currentTicket.getId().equals(i)) {
+            return true;
+        }
+        
         return false;
     }
     
@@ -83,37 +88,61 @@ public class HelpDeskModel {
     
     // ----------------------------------------------------------
     /**
-     * Removes the oldest ticket from openTickets and add it to 
-     * completedTickets.
-     * @return the ticket being moved from openTickets to closedTickets
+     * Starts processing the next ticket in the queue
+     * @throws IllegalStateException if a ticket is already being processed or
+     * if there are no tickets to process
      */
-    public Ticket processNextTicket() {
+    public void startNextTicket() {
         
-        Ticket t = openTickets.dequeue();
+        if (currentTicket != null) {
+            throw new IllegalStateException("Already processing a ticket.");
+        }
+        if (openTickets.isEmpty()) {
+            throw new IllegalStateException("No tickets to process.");
+        }
         
-        t.updateStatus("Closed");
-        
-        completedTickets.add(t);
-        
-        return t;
+        currentTicket = openTickets.dequeue();
+        currentTicket.startProcessing();
     }
     
     // ----------------------------------------------------------
     /**
-     * Returns whether there are open tickets pending.
+     * Finishes processing the current ticket being processed.
+     * @throws IllegalStateException if no ticket is currently being processed
+     */
+    public void completeCurrentTicket() {
+        if (currentTicket == null) {
+            throw new IllegalStateException
+            ("No ticket currently being processed");
+        }
+        
+        currentTicket.completeProcessing();
+        completedTickets.add(currentTicket);
+        currentTicket = null;
+    }
+    
+    // ----------------------------------------------------------
+    /**
+     * Returns whether there are open tickets pending. Considers currentTicket
+     * as well.
      * @return true if openTicket is not empty
      */
     public boolean hasPendingTickets() {
-        return !openTickets.isEmpty();
+        return !openTickets.isEmpty() || currentTicket != null;
     }
     
     // ----------------------------------------------------------
     /**
-     * Returns the pending tickets as a List.
+     * Returns the pending tickets as a List. Includes the currentTicket being
+     * processed if there is one.
      * @return the entries of openTickets in a list
      */
     public List<Ticket> getPendingTickets() {
-        return new ArrayList<>(openTickets.toList());
+        ArrayList<Ticket> ret = new ArrayList<>(openTickets.toList());
+        if (currentTicket != null) {
+            ret.add(currentTicket);
+        }
+        return ret;
     }
     
     // ----------------------------------------------------------
@@ -133,11 +162,20 @@ public class HelpDeskModel {
      */
     public void savePendingTickets(String filepath) throws IOException {
         
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filepath))) {
+        try (BufferedWriter writer = new BufferedWriter
+            (new FileWriter(filepath))) {
             for (Ticket t : openTickets.toList()) {
                 writer.write(csv(t.getId()) + "," + csv(t.getCategory()) + ","
                     + csv(t.getDescription()) + "," + csv(t.getSeverity())
                     + "," + csv(t.getStatus()));
+                writer.newLine();
+            }
+            if (currentTicket != null) {
+                writer.write(csv(currentTicket.getId()) + "," 
+                    + csv(currentTicket.getCategory()) + ","
+                    + csv(currentTicket.getDescription()) + ","
+                    + csv(currentTicket.getSeverity()) + ","
+                    + csv(currentTicket.getStatus()));
                 writer.newLine();
             }
         }
@@ -159,6 +197,7 @@ public class HelpDeskModel {
         
         Queue<Ticket> loadedTickets = new Queue<>();
         List<String> loadedIds = new ArrayList<>();
+        Ticket loadedCurrentTicket = null;
         
         try (PushbackReader reader = new PushbackReader(new FileReader(f), 1)) {
             List<String> parts;
@@ -167,36 +206,66 @@ public class HelpDeskModel {
                     throw new IOException("Malformed ticket data.");
                 }
                 Ticket t;
+                String status;
+                
                 try {
-                    t = new Ticket(parts.get(0), parts.get(1), parts.get(2), parts.get(3));
-                    t.updateStatus(parts.get(4).trim());
-                    if (t.getStatus().equals("Closed")) {
-                        throw new IllegalArgumentException("Closed ticket in pending file.");
+                    t = new Ticket(parts.get(0), parts.get(1), parts.get(2), 
+                        parts.get(3));
+                    status = parts.get(4).trim();
+
+                    if (!status.equals("Open") && 
+                        !status.equals("In progress")) {
+                        throw new IllegalArgumentException
+                        ("Invalid ticket status.");
                     }
+
+                    t.updateStatus(status);
                 }
                 catch (IllegalArgumentException e) {
                     throw new IOException("Invalid ticket data.", e);
                 }
+                
                 boolean completedId = false;
+
                 for (Ticket completed : completedTickets) {
                     completedId |= completed.getId().equals(t.getId());
                 }
-                if (loadedIds.contains(t.getId()) || completedId) {
+
+                boolean currentId = currentTicket != null
+                    && currentTicket.getId().equals(t.getId());
+
+                if (loadedIds.contains(t.getId()) || completedId || currentId) {
                     throw new IOException("Duplicate ticket ID.");
                 }
+                
                 loadedIds.add(t.getId());
-                loadedTickets.enqueue(t);
+
+                if (status.equals("Open")) {
+                    loadedTickets.enqueue(t);
+                } else {
+                    if (loadedCurrentTicket != null) {
+                        throw new IOException
+                        ("Multiple tickets currently in progress.");
+                    }
+
+                    loadedCurrentTicket = t;
+                }
             }
         }
 
         openTickets = loadedTickets;
+        currentTicket = loadedCurrentTicket;
     }
+    
     private static String csv(String value) {
         return "\"" + value.replace("\"", "\"\"") + "\"";
     }
 
-    /** Reads quoted CSV, including commas, quotes, and newlines in descriptions. */
-    private static List<String> readRecord(PushbackReader reader) throws IOException {
+    /** Reads quoted CSV, including commas, quotes, and newlines in 
+     *  descriptions. 
+     */
+    private static List<String> readRecord(PushbackReader reader) 
+        throws IOException {
         List<String> fields = new ArrayList<>();
         StringBuilder field = new StringBuilder();
         boolean quoted = false;

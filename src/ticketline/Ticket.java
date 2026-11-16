@@ -138,7 +138,7 @@ public class Ticket implements Comparable<Ticket> {
      * @param newStatus the updated status for the ticket
      * @throws IllegalArgumentException if the new status is null or empty
      */
-    private void updateStatus(String newStatus) {
+    public void updateStatus(String newStatus) {
         if (newStatus == null || !(newStatus.equals("Open") || 
             newStatus.equals("In progress") || newStatus.equals("Closed"))) {
             throw new IllegalArgumentException("Invalid status.");
