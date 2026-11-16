@@ -15,10 +15,12 @@ public class TicketController {
 
     private static final String SAVE_FILE = "tickets.txt";
     private static final String NO_PENDING_MESSAGE = "No pending tickets.";
+    private static final String NO_DATA_MESSAGE = "Not enough data.";
 
     private final HelpDeskModel model;
     private final ConsoleView view;
     private boolean running;
+    private final String saveFile;
 
     // ~ Constructors ..........................................................
 
@@ -31,8 +33,19 @@ public class TicketController {
      *            The instance of ConsoleView
      */
     public TicketController(HelpDeskModel model, ConsoleView view) {
+        this(model, view, SAVE_FILE);
+    }
+
+
+    /** Uses an explicit save path so tests never overwrite a real session. */
+    public TicketController(
+        HelpDeskModel model,
+        ConsoleView view,
+        String saveFile) {
         this.model = Objects.requireNonNull(model, "model must not be null");
         this.view = Objects.requireNonNull(view, "view must not be null");
+        this.saveFile = Objects.requireNonNull(saveFile,
+            "saveFile must not be null");
     }
 
     // ~Public Methods ........................................................
@@ -51,7 +64,7 @@ public class TicketController {
     /** Loads any saved tickets, then runs the main menu loop. */
     public void start() {
         try {
-            model.loadTickets(SAVE_FILE);
+            model.loadPendingTickets(saveFile);
         }
         catch (Exception e) {
             view.displayError("Could not load saved tickets: " + e.getMessage()
@@ -66,7 +79,7 @@ public class TicketController {
         running = true;
         while (running) {
             view.displayMenu();
-            handleMenuChoice(view.promptMenuChoice());
+            handleMenuChoice(view.getMenuChoice());
         }
     }
 
@@ -98,9 +111,15 @@ public class TicketController {
             case "5":
                 handleExit();
                 break;
+            case "6":
+                handleCompleteCurrent();
+                break;
+            case "7":
+                handleShowTimingSummary();
+                break;
             default:
                 view.displayError(
-                    "Invalid selection. Please enter a number from 1 to 5.");
+                    "Invalid selection. Please enter a number from 1 to 7.");
                 break;
         }
     }
@@ -113,15 +132,18 @@ public class TicketController {
         boolean finished = false;
         while (!finished) {
             String id = readPositiveId();
-            String category = view.promptCategory();
-            String description = view.promptDescription();
-            // TODO (if severity joins the MVP): String severity =
-            // view.promptSeverity();
-            // and pass it to model.submitTicket(...) below.
+            String category = view.getCategory();
+            String description = view.getDescription();
+            String severity = view.getSeverity();
+            if (id == null || category == null || description == null
+                || severity == null) {
+                handleExit();
+                return;
+            }
 
             try {
-                if (model.submitTicket(id, category, description)) {
-                    view.displayMessage("Ticket " + id + " submitted.");
+                if (model.submitTicket(id, category, description, severity)) {
+                    view.displayTicketSubmitted(id);
                     finished = true;
                 }
                 else {
@@ -142,17 +164,25 @@ public class TicketController {
     }
 
 
-    /** Displays every pending ticket in queue order. */
+    /**
+     * Displays every pending ticket in queue order, with an estimated wait
+     * time for each as the sixth column.
+     */
     public void handleViewPending() {
         List<Ticket> pending = model.getPendingTickets();
         if (pending.isEmpty()) {
             view.displayMessage(NO_PENDING_MESSAGE);
             return;
         }
-        view.displayMessage("Pending tickets (" + pending.size() + "):");
-        for (Ticket ticket : pending) {
-            showTicket(ticket);
+        String[][] rows = new String[pending.size()][6];
+        for (int i = 0; i < pending.size(); i++) {
+            Ticket ticket = pending.get(i);
+            rows[i] = new String[] { ticket.getId(), ticket.getCategory(),
+                ticket.getDescription(), ticket.getSeverity(), ticket
+                    .getStatus(), formatDuration(model.getEstimatedWaitTime(
+                        ticket.getId())) };
         }
+        view.displayPendingTickets(rows);
     }
 
 
@@ -164,7 +194,7 @@ public class TicketController {
         }
         try {
             view.displayMessage("Next ticket:");
-            showTicket(model.getNextTicket());
+            showTicket(model.peekNextTicket());
         }
         catch (IllegalStateException e) {
             view.displayMessage(NO_PENDING_MESSAGE);
@@ -172,20 +202,48 @@ public class TicketController {
     }
 
 
-    /** Processes the next ticket and displays the result. */
+    /**
+     * Starts the next ticket (it becomes the current ticket) and displays it.
+     * The ticket is finished separately by handleCompleteCurrent().
+     */
     public void handleProcessNext() {
         if (!model.hasPendingTickets()) {
             view.displayMessage(NO_PENDING_MESSAGE);
             return;
         }
         try {
-            Ticket processed = model.processNextTicket();
-            view.displayMessage("Processed ticket:");
-            showTicket(processed);
+            Ticket started = model.startNextTicket();
+            view.displayCurrentTicket(started.getId(), started.getCategory(),
+                started.getDescription(), started.getSeverity(), started
+                    .getStatus());
         }
         catch (IllegalStateException e) {
-            view.displayMessage(NO_PENDING_MESSAGE);
+            // e.g. a ticket is already being processed
+            view.displayError(e.getMessage());
         }
+    }
+
+
+    /** Completes the current ticket and displays the result. */
+    public void handleCompleteCurrent() {
+        try {
+            Ticket completed = model.completeCurrentTicket();
+            view.displayTicketProcessed(completed.getId());
+            view.displayTicketDetails(completed.getId(), completed
+                .getCategory(), completed.getDescription(), completed
+                    .getSeverity(), completed.getStatus());
+        }
+        catch (IllegalStateException e) {
+            // e.g. no ticket is currently being processed
+            view.displayError(e.getMessage());
+        }
+    }
+
+
+    /** Displays the average resolution time of completed tickets. */
+    public void handleShowTimingSummary() {
+        view.displayTimingSummary(formatDuration(model
+            .getAverageResolutionTime()));
     }
 
 
@@ -196,20 +254,28 @@ public class TicketController {
         boolean saved = false;
         while (!saved) {
             try {
-                model.saveTickets(SAVE_FILE);
+                model.savePendingTickets(saveFile);
                 saved = true;
             }
             catch (Exception e) {
                 view.displayError("Could not save tickets: " + e.getMessage());
+                if (view.isInputExhausted()) {
+                    view.displayError("Input ended; exiting without saving.");
+                    running = false;
+                    return;
+                }
                 if (askYesNo("Exit without saving? (y/n)")) {
                     break;
                 }
                 if (!askYesNo("Try saving again? (y/n)")) {
+                    if (view.isInputExhausted()) {
+                        running = false;
+                    }
                     return;
                 }
             }
         }
-        view.displayMessage("Goodbye.");
+        view.displayExitMessage();
         running = false;
     }
 
@@ -222,10 +288,10 @@ public class TicketController {
      */
     private String readPositiveId() {
         while (true) {
-            String raw = view.promptTicketId();
+            String raw = view.getTicketID();
             try {
                 if (raw == null) {
-                    throw new NumberFormatException("null input");
+                    return null;
                 }
                 int value = Integer.parseInt(raw.trim());
                 if (value > 0) {
@@ -250,8 +316,20 @@ public class TicketController {
      * Converts a Ticket to plain Strings so the view never sees a model object.
      */
     private void showTicket(Ticket ticket) {
-        view.displayTicket(String.valueOf(ticket.getID()), String.valueOf(ticket
-            .getCategory()), String.valueOf(ticket.getDescription()));
+        view.displayNextTicket(ticket.getId(), ticket.getCategory(), ticket
+            .getDescription(), ticket.getSeverity(), ticket.getStatus());
+    }
+
+
+    /**
+     * Turns a duration in seconds into display text. A negative value means
+     * the model has no data yet.
+     */
+    private String formatDuration(long seconds) {
+        if (seconds < 0) {
+            return NO_DATA_MESSAGE;
+        }
+        return (seconds / 60) + "m " + (seconds % 60) + "s";
     }
 
 }
